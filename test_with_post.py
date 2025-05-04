@@ -10,6 +10,7 @@ import logging
 from dotenv import load_dotenv
 from telethon import TelegramClient
 import openai
+from translator import get_openai_client, translate_text
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
@@ -27,46 +28,7 @@ SRC_CHANNEL = os.getenv('SRC_CHANNEL')
 DST_CHANNEL = os.getenv('DST_CHANNEL')
 
 # Initialize OpenAI client
-client = openai.OpenAI(api_key=OPENAI_KEY)
-
-def translate_left(text):
-    """Translate text to casual, left-leaning Russian zoomer slang"""
-    prompt = (
-        "You are a razor-sharp Russian Gen Z activist with biting wit. "
-        "Rewrite this news entirely in Russian, using edgy, punchy zoomer slang with savage humor—no English allowed, only Russian loanwords with Russian endings. "
-        "Include one darkly funny punchline, use slang like 'криндж', 'лол', 'трушно', 'прикол', and emojis 🤯🔥. "
-        "Keep the social justice angle but make it sound like a stand-up bit—zero fluff, zero formal tone!"
-    )
-    resp = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[
-            {"role": "system", "content": prompt},
-            {"role": "user", "content": text}
-        ],
-        max_completion_tokens=800,
-        temperature=1
-    )
-    return resp.choices[0].message.content.strip()
-
-
-def translate_right(text):
-    """Translate text to coarse, right-wing Russian bidlo slang"""
-    prompt = (
-        "You are an unfiltered Russian Gen Z 'bidlo' armed with savage sarcasm. "
-        "Rewrite the news entirely in Russian, using coarse, blunt bidlo slang—no English sentences whatsoever, only Russian loanwords. "
-        "Deliver one gut-punch barb that drips disdain, use words like 'хуяк', 'патриот', 'бабки', and emojis 💀🤑. "
-        "Crush leftist squeals, but keep the facts intact—full venom, zero vanilla."
-    )
-    resp = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[
-            {"role": "system", "content": prompt},
-            {"role": "user", "content": text}
-        ],
-        max_completion_tokens=800,
-        temperature=1
-    )
-    return resp.choices[0].message.content.strip()
+client = get_openai_client(OPENAI_KEY)
 
 async def main():
     """Main test function"""
@@ -85,7 +47,7 @@ async def main():
 
         # Left-leaning translation
         logger.info("Translating LEFT style...")
-        left = translate_left(text)
+        left = await translate_text(client, text, 'left')
         logger.info(f"LEFT translation snippet: {left[:100]}...")
         # Post heading then the translation
         await tg_client.send_message(DST_CHANNEL, "🟢 LEFT-ZOOMER VERSION:")
@@ -94,7 +56,7 @@ async def main():
 
         # Right-wing translation
         logger.info("Translating RIGHT style...")
-        right = translate_right(text)
+        right = await translate_text(client, text, 'right')
         logger.info(f"RIGHT translation snippet: {right[:100]}...")
         # Post heading then the translation
         await tg_client.send_message(DST_CHANNEL, "🔴 RIGHT-BIDLO VERSION:")

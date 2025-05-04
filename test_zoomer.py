@@ -10,6 +10,7 @@ import logging
 from dotenv import load_dotenv
 from telethon import TelegramClient
 import openai
+from translator import get_openai_client, translate_text
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
@@ -26,27 +27,7 @@ SESSION = os.getenv('TG_SESSION', 'nyt_to_zoom')
 SRC_CHANNEL = os.getenv('SRC_CHANNEL')
 
 # Initialize OpenAI client
-client = openai.OpenAI(api_key=OPENAI_KEY)
-
-async def translate_text(text):
-    """Translate text to Russian Zoomer slang"""
-    try:
-        resp = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are a Zoomer. Translate the following text into concise, punchy Russian Zoomer slang."
-                },
-                {"role": "user", "content": text}
-            ],
-            max_tokens=500,
-            temperature=0.8,
-        )
-        return resp.choices[0].message.content.strip()
-    except Exception as e:
-        logger.error(f"OpenAI API error: {str(e)}")
-        raise
+client = get_openai_client(OPENAI_KEY)
 
 async def main():
     """Main test function"""
@@ -73,7 +54,7 @@ async def main():
         
         # Translate the message
         logger.info("Translating to Russian Zoomer slang...")
-        translated = await translate_text(latest_msg)
+        translated = await translate_text(client, latest_msg, 'left')
         
         # Display results
         logger.info("\n----- ORIGINAL TEXT -----\n")

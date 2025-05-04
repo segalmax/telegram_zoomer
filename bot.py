@@ -3,8 +3,8 @@ import asyncio
 import logging
 from telethon import TelegramClient, events
 import openai
-from tenacity import retry, stop_after_attempt, wait_exponential
 from dotenv import load_dotenv
+from translator import get_openai_client, translate_text
 
 # Load environment variables
 load_dotenv()
@@ -27,7 +27,7 @@ DST_CHANNEL = os.getenv('DST_CHANNEL')
 TRANSLATION_STYLE = os.getenv('TRANSLATION_STYLE', 'both')
 
 # Initialize OpenAI client
-client = openai.OpenAI(api_key=OPENAI_KEY)
+client = get_openai_client(OPENAI_KEY)
 
 # Determine if running in Docker
 IN_DOCKER = os.path.exists("/.dockerenv")
@@ -38,46 +38,6 @@ session_path = os.path.join(session_dir, SESSION)
 
 # Create Telegram client with the appropriate session path
 tg_client = TelegramClient(session_path, API_ID, API_HASH)
-
-def get_prompt(style):
-    """Get the appropriate prompt based on translation style"""
-    if style == 'left':
-        return (
-            "You are a razor-sharp Russian Gen Z activist with biting wit. "
-            "Rewrite this news entirely in Russian, using edgy, punchy zoomer slang with savage humor—no English allowed, only Russian loanwords with Russian endings. "
-            "Include one darkly funny punchline, use slang like 'криндж', 'лол', 'трушно', 'прикол', and emojis 🤯🔥. "
-            "Keep the social justice angle but make it sound like a stand-up bit—zero fluff, zero formal tone!"
-        )
-    elif style == 'right':
-        return (
-            "You are an unfiltered Russian Gen Z 'bidlo' armed with savage sarcasm. "
-            "Rewrite the news entirely in Russian, using coarse, blunt bidlo slang—no English sentences whatsoever, only Russian loanwords. "
-            "Deliver one gut-punch barb that drips disdain, use words like 'хуяк', 'патриот', 'бабки', and emojis 💀🤑. "
-            "Crush leftist squeals, but keep the facts intact—full venom, zero vanilla."
-        )
-    else:
-        return (
-            "You are a Zoomer. Translate the following text into concise, punchy Russian Zoomer slang."
-        )
-
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
-async def translate_text(text, style='left'):
-    """Translate text with exponential backoff retry logic"""
-    try:
-        prompt = get_prompt(style)
-        resp = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {"role": "system", "content": prompt},
-                {"role": "user", "content": text}
-            ],
-            max_completion_tokens=800,
-            temperature=1
-        )
-        return resp.choices[0].message.content.strip()
-    except Exception as e:
-        logger.error(f"OpenAI API error: {str(e)}")
-        raise
 
 @tg_client.on(events.NewMessage(chats=SRC_CHANNEL))
 async def handle_new_message(event):
@@ -92,7 +52,7 @@ async def handle_new_message(event):
         if TRANSLATION_STYLE == 'both':
             # Translate both styles and post both
             logger.info("Translating in LEFT style...")
-            left = await translate_text(txt, 'left')
+            left = await translate_text(client, txt, 'left')
             logger.info(f"LEFT translation snippet: {left[:100]}...")
             
             await tg_client.send_message(DST_CHANNEL, "🟢 LEFT-ZOOMER VERSION:")
@@ -100,7 +60,7 @@ async def handle_new_message(event):
             logger.info("Posted left-leaning version")
             
             logger.info("Translating in RIGHT style...")
-            right = await translate_text(txt, 'right')
+            right = await translate_text(client, txt, 'right')
             logger.info(f"RIGHT translation snippet: {right[:100]}...")
             
             await tg_client.send_message(DST_CHANNEL, "🔴 RIGHT-BIDLO VERSION:")
@@ -110,7 +70,7 @@ async def handle_new_message(event):
             # Translate in configured style only
             style = TRANSLATION_STYLE
             logger.info(f"Translating in {style.upper()} style...")
-            zoomer = await translate_text(txt, style)
+            zoomer = await translate_text(client, txt, style)
             logger.info(f"Translation snippet: {zoomer[:100]}...")
             
             if style == 'left':

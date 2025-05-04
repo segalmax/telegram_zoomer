@@ -7,7 +7,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
-COPY bot.py .
+COPY bot.py translator.py ./
 
 # Create directories for logs and sessions
 RUN mkdir -p /app/logs /app/session
