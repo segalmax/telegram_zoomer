@@ -1,0 +1,9 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+- always update the PROJECT.md file when something changes. 
+- manage the PROJECT.md file in a MVP 80/20 style - I want to get to users fast - optimise later so no fluff, most effective things first.
+- I like nested structures (like nested todos)
+- I do have .env file!! just asume i have it, you don't see it because it's gitignoreed
