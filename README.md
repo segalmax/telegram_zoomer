@@ -67,12 +67,17 @@ For headless servers, start the bot locally first to create the session file, th
 
 ## Authentication
 
-This bot uses Telethon to authenticate with Telegram. The authentication process has been redesigned for reliability:
+This bot uses Telethon to authenticate with Telegram. The authentication process has been simplified for reliability:
 
-1. First, clear any existing sessions: `python scripts/reset_all_sessions.py`
-2. Create a new authenticated session: `python test_minimal.py`
-   - You'll be prompted for the authentication code sent to your Telegram account
-3. Once authenticated, run the bot normally: `python bot.py` or `make start`
+1. Ensure you have the correct API credentials in your .env file
+2. Run the bot with `python bot.py`
+3. You'll be prompted for the authentication code sent to your Telegram account
+4. After successful authentication, the session will be saved for future use
+
+If you need to authenticate separately before running the main bot, you can use:
+```bash
+python scripts/complete_auth.py
+```
 
 If authentication fails or times out, check the troubleshooting section in PROJECT.md.
 
