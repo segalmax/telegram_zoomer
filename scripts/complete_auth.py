@@ -19,10 +19,10 @@ load_dotenv()
 # Configuration from environment
 API_ID = int(os.getenv('TG_API_ID'))
 API_HASH = os.getenv('TG_API_HASH')
-PHONE = "+972509909987"
+PHONE = os.getenv('TG_PHONE')
 
 # The main session file to use for the bot
-SESSION = "nyt_to_zoom"
+SESSION = "new_session"
 
 async def complete_authentication():
     """Complete the authentication process by signing in with a code"""

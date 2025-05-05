@@ -303,4 +303,33 @@ python test_zoomer.py
 
 # Setup Docker volume (done automatically by 'make start')
 ./setup_docker.sh
-``` 
+```
+
+## Overview
+A Telegram bot that monitors a source channel (NYT) and translates its posts into Russian zoomer slang, posting them to a destination channel with an optional AI-generated image illustration.
+
+## Project Status
+- ✅ Bot core functionality working
+- ✅ Integration with OpenAI for translations (GPT-4o)
+- ✅ Dual translation styles (LEFT and RIGHT zoomer slang)
+- ✅ Image generation with DALL-E
+- ✅ End-to-end testing completed with test source and destination channels
+- ✅ Production deployment ready
+
+## Project Structure
+- `bot.py` - Main bot logic, handles Telegram connection and processing
+- `translator.py` - Handles translation requests to OpenAI API
+- `image_generator.py` - Handles image generation with DALL-E
+- `test_core.py` - Non-Telegram tests for translation and image generation
+- `test_e2e.py` - End-to-end tests with Telegram integration
+
+## Configuration
+- Environment variables in `.env` file
+- Required fields:
+  - `TG_API_ID` and `TG_API_HASH` - Telegram API credentials
+  - `TG_SESSION` - Session file name
+  - `TG_PHONE` - Phone number for authentication
+  - `OPENAI_API_KEY` - OpenAI API key
+  - `SRC_CHANNEL` and `DST_CHANNEL` - Telegram channel usernames
+  - `TRANSLATION_STYLE` - "left", "right", or "both"
+  - `GENERATE_IMAGES` - "true" or "false" 
