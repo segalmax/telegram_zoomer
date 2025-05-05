@@ -248,6 +248,10 @@ python test_e2e.py
 - [x] Non-interactive mode:
   - [x] Bot.py detects Docker environment
   - [x] Skip interactive prompts when in container
+- [x] To pinpoint start/auth hang:
+  - Disable image generation: set `GENERATE_IMAGES=false` to rule out the image path
+  - Run in batch mode: `python bot.py --process-recent 1` to bypass live event loop
+  - Test a minimal Telethon connect script that only loads the session and calls `client.connect()`
 
 ## Production Checklist
 - [x] Verified all environment variables
@@ -267,6 +271,16 @@ python test_e2e.py
 - If container crashes: Check logs for error details
 - If English text appears in translations: Adjust prompts to enforce full translation
 - If Docker volumes have permission issues on macOS: Use named volumes in docker-compose.yml
+- For Telethon connection issues:
+  - Use `ConnectionTcpAbridged` connection type
+  - Provide `device_model`, `system_version`, and `app_version` parameters
+  - Use connection timeout pattern with `create_task()` + `wait_for()`
+  - Avoid global client variable, use function parameter instead
+
+## Authentication Steps
+1. Ensure you have the correct API credentials in your .env file
+2. Run the bot with `python simplified_bot.py`
+3. Enter the verification code when prompted
 
 ## Quick Commands
 ```

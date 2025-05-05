@@ -198,156 +198,112 @@ async def process_recent_posts(client, limit=10, timeout=300):
         logger.info(f"Processing messages in reverse order (oldest first)...")
         
         processed_count = 0
-        remaining_time = timeout - (time.time() - start_time)
-        
-        # Estimate time per message and adjust batch size if needed
-        estimated_time_per_msg = remaining_time / limit  # Estimate based on total available time
-        logger.info(f"Estimated time per message: {estimated_time_per_msg:.2f} seconds")
-        
-        # If we're running out of time, process fewer messages
-        if estimated_time_per_msg < 10:  # If less than 10 seconds per message
-            adjusted_limit = max(1, int(remaining_time / 30))  # Allow at least 30s per message
-            if adjusted_limit < limit:
-                logger.warning(f"Adjusting batch size from {limit} to {adjusted_limit} messages due to time constraints")
-                messages = messages[:adjusted_limit]
-        
-        for msg in reversed(messages):
-            # Skip messages without text
-            if not msg.text:
-                logger.info(f"Skipping message {msg.id} - No text content")
-                continue
-                
-            # Check overall timeout
-            if time.time() - start_time > timeout - 30:  # Reserve 30s for cleanup
-                logger.warning(f"Approaching timeout limit, stopping after processing {processed_count} messages")
+        for idx, message in enumerate(reversed(messages)):
+            # Check if timeout is approaching
+            if time.time() - start_time > timeout * 0.9:
+                logger.warning(f"Approaching timeout after processing {processed_count} messages. Stopping.")
                 break
                 
-            logger.info(f"Processing message {msg.id}: {msg.text[:50]}...")
-            
-            # Process with individual timeout
-            try:
-                processing_timeout = min(180, (timeout - (time.time() - start_time)) / 2)
-                logger.info(f"Setting per-message timeout of {processing_timeout:.2f} seconds")
+            txt = message.text
+            if not txt:
+                logger.info(f"Skipping message {idx+1} (no text content)")
+                continue
                 
-                process_task = asyncio.create_task(translate_and_post(client, msg.text, msg.id))
-                success = await asyncio.wait_for(process_task, timeout=processing_timeout)
-                
-                if success:
-                    processed_count += 1
-                    logger.info(f"Successfully processed message {msg.id} ({processed_count}/{len(messages)})")
-                else:
-                    logger.warning(f"Failed to process message {msg.id}")
-            except asyncio.TimeoutError:
-                logger.error(f"Timed out processing message {msg.id} after {processing_timeout:.2f} seconds")
-            except Exception as e:
-                logger.error(f"Error processing message {msg.id}: {str(e)}", exc_info=True)
+            logger.info(f"Processing message {idx+1}/{len(messages)}: {txt[:50]}...")
+            start_msg_time = time.time()
             
-            # Brief pause between messages to avoid rate limits
-            await asyncio.sleep(1)
+            success = await translate_and_post(client, txt, message.id)
+            
+            if success:
+                processed_count += 1
+                logger.info(f"Successfully processed message {idx+1} in {time.time() - start_msg_time:.2f} seconds")
+            else:
+                logger.error(f"Failed to process message {idx+1}")
+            
+            # Add a small delay between posts to avoid rate limiting
+            logger.info("Waiting 5 seconds before next message...")
+            await asyncio.sleep(5)
+            
+        elapsed = time.time() - start_time
+        logger.info(f"Finished processing {processed_count} of {len(messages)} posts in {elapsed:.2f} seconds")
         
-        logger.info(f"Batch processing completed. Processed {processed_count}/{len(messages)} messages")
-        return processed_count
     except Exception as e:
-        logger.error(f"Error in batch processing: {str(e)}", exc_info=True)
-        return 0
+        logger.error(f"Error processing recent posts: {str(e)}", exc_info=True)
 
 async def run_bot():
-    """Main function to run the bot"""
+    """Main entry point for the bot, using our proven minimal approach"""
     logger.info("Starting Telegram Zoomer bot")
     logger.info(f"Python version: {sys.version}")
     
+    # Verify all required env vars are present
+    required_vars = ['TG_API_ID', 'TG_API_HASH', 'OPENAI_API_KEY', 'SRC_CHANNEL', 'DST_CHANNEL']
+    missing = [var for var in required_vars if not os.getenv(var)]
+    
+    if missing:
+        logger.error(f"Missing required environment variables: {', '.join(missing)}")
+        return
+
+    # Create client following the working minimal test exactly
+    client = TelegramClient(
+        SESSION, 
+        API_ID, 
+        API_HASH,
+        connection=ConnectionTcpAbridged,
+        device_model="MacBook",
+        system_version="15.3",
+        app_version="1.0",
+        connection_retries=1
+    )
+    
     try:
-        # Create client with ConnectionTcpAbridged (more reliable than default)
+        # Connect with timeout, following the pattern from minimal test
         logger.info("Connecting to Telegram...")
-        client = TelegramClient(
-            SESSION, 
-            API_ID, 
-            API_HASH,
-            connection=ConnectionTcpAbridged,
-            device_model="Macbook",
-            system_version="macOS 14",
-            app_version="Telegram Zoomer Bot 1.0"
-        )
-        
-        # Connect with timeout
-        try:
-            connect_task = asyncio.create_task(client.connect())
-            await asyncio.wait_for(connect_task, timeout=30)
-            logger.info("Connected successfully")
-        except asyncio.TimeoutError:
-            logger.error("Timed out while connecting to Telegram")
-            return
+        connect_task = asyncio.create_task(client.connect())
+        await asyncio.wait_for(connect_task, timeout=15)
+        logger.info("Connected successfully")
         
         # Check if already authorized
         if not await client.is_user_authorized():
-            logger.info("Not authorized yet, sending code request")
-            
-            # Request authorization code with timeout
+            logger.error("Not authorized! Please run test_minimal.py first to authenticate.")
+            return
+        
+        logger.info("Successfully authorized - ready to process messages")
+        
+        # Set up message event handlers
+        setup_event_handlers_task = asyncio.create_task(setup_event_handlers(client))
+        await asyncio.wait_for(setup_event_handlers_task, timeout=5)
+        
+        # Check for --process-recent flag in command line args
+        if "--process-recent" in sys.argv:
+            # Get number of posts to process (default 10)
             try:
-                phone_task = asyncio.create_task(client.send_code_request(os.getenv('TG_PHONE')))
-                await asyncio.wait_for(phone_task, timeout=30)
-                logger.info("Code request sent successfully")
-            except asyncio.TimeoutError:
-                logger.error("Timed out while sending code request")
-                return
-            
-            try:
-                # Start client with phone auth
-                # This will prompt for verification code in console
-                await client.start(phone=os.getenv('TG_PHONE'))
-                logger.info("Authenticated successfully")
-            except Exception as e:
-                logger.error(f"Authentication failed: {str(e)}")
-                return
-        else:
-            logger.info("Already authorized")
-            
-            # Start client (this ensures proper connection)
-            try:
-                start_task = asyncio.create_task(client.start())
-                await asyncio.wait_for(start_task, timeout=30)
-                logger.info("Successfully authorized - ready to process messages")
-            except asyncio.TimeoutError:
-                logger.error("Timed out while starting client")
-                return
-            except Exception as e:
-                logger.error(f"Error starting client: {str(e)}")
-                return
+                idx = sys.argv.index("--process-recent")
+                if idx + 1 < len(sys.argv) and sys.argv[idx + 1].isdigit():
+                    limit = int(sys.argv[idx + 1])
+                else:
+                    limit = 10
+                    
+                logger.info(f"Running in batch mode to process {limit} recent posts")
+            except (ValueError, IndexError):
+                limit = 10
+                logger.info(f"Running in batch mode with default limit of {limit} posts")
                 
-        # Check command line arguments
-        import argparse
-        parser = argparse.ArgumentParser(description='Telegram NYT-to-Zoomer Bot')
-        parser.add_argument('--process-recent', type=int, help='Process N most recent posts')
-        args = parser.parse_args()
-        
-        if args.process_recent:
-            # Process recent posts in batch mode
-            try:
-                await process_recent_posts(client, limit=args.process_recent)
-                logger.info("Batch processing completed")
-            except Exception as e:
-                logger.error(f"Error in batch processing: {str(e)}")
-            finally:
-                await client.disconnect()
-                return
-        
-        # Set up event handlers for continuous mode
+            await process_recent_posts(client, limit)
+            logger.info("Batch processing completed, exiting")
+            return
+            
         logger.info(f"Listening for new posts from {SRC_CHANNEL}")
         logger.info(f"Translation style: {TRANSLATION_STYLE}")
         logger.info(f"Generate images: {GENERATE_IMAGES}")
-        await setup_event_handlers(client)
-        
-        # Run the client until disconnected
         await client.run_until_disconnected()
+        
     except Exception as e:
-        logger.error(f"Bot error: {str(e)}", exc_info=True)
+        logger.error(f"Critical error: {str(e)}", exc_info=True)
     finally:
+        # Always ensure we're disconnected
+        if client and client.is_connected():
+            await client.disconnect()
         logger.info("Bot stopped")
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(run_bot())
-    except KeyboardInterrupt:
-        logger.info("Bot stopped by user")
-    except Exception as e:
-        logger.error(f"Fatal error: {str(e)}", exc_info=True) 
+    asyncio.run(run_bot()) 

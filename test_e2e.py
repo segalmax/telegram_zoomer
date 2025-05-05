@@ -57,11 +57,22 @@ async def translate_and_post_with_image(tg_client, text):
     try:
         # Generate image based on post content
         logger.info("Generating image for post...")
-        image_data = await generate_image_for_post(client, text)
+        result = await generate_image_for_post(client, text)
         
-        if not image_data:
+        image_data = None
+        image_url = None
+        
+        if result:
+            if isinstance(result, str):
+                # It's a URL
+                image_url = result
+                logger.info(f"Using image URL: {image_url[:100]}...")
+            else:
+                # It's BytesIO data
+                image_data = result
+                logger.info("Image data received successfully")
+        else:
             logger.error("Failed to generate image")
-            return False
             
         # Translate in both styles
         logger.info("Translating in LEFT style...")
@@ -70,8 +81,20 @@ async def translate_and_post_with_image(tg_client, text):
         
         # Post header, image, and translation
         await tg_client.send_message(TEST_DST_CHANNEL, "🟢 LEFT-ZOOMER TEST VERSION:")
-        await tg_client.send_file(TEST_DST_CHANNEL, image_data, caption=left[:1024])
-        logger.info("Posted left-leaning version with image")
+        
+        if image_data:
+            # Post with image data
+            await tg_client.send_file(TEST_DST_CHANNEL, image_data, caption=left[:1024])
+            logger.info("Posted left-leaning version with image data")
+        elif image_url:
+            # Post with image URL
+            left_with_url = f"{left}\n\n🖼️ {image_url}"
+            await tg_client.send_message(TEST_DST_CHANNEL, left_with_url)
+            logger.info("Posted left-leaning version with image URL")
+        else:
+            # Post text only
+            await tg_client.send_message(TEST_DST_CHANNEL, left)
+            logger.info("Posted left-leaning version (text only)")
         
         logger.info("Translating in RIGHT style...")
         right = await translate_text(client, text, 'right')
