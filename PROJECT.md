@@ -8,6 +8,10 @@
 - [x] Multiple translation styles implemented
 - [x] Sophisticated prompting for authentic slang
 - [x] Fixed Docker volume permissions on macOS
+- [x] Added AI image generation based on post content
+- [x] Added ability to process multiple recent posts
+- [x] Added test channels for end-to-end testing
+- [x] AWS deployment instructions
 
 ## Step-by-Step Deployment Path
 
@@ -23,57 +27,216 @@
 
 ### 2. Configure Environment
 - [x] Create .env file with credentials:
-  - [x] Copy from .env-example
-  - [x] Add Telegram API_ID and API_HASH
-  - [x] Add OPENAI_API_KEY
-  - [x] Set SRC_CHANNEL and DST_CHANNEL values
-  - [x] Set TG_SESSION name if needed
-  - [x] Configure TRANSLATION_STYLE (LEFT, RIGHT, or BOTH)
+  - [x] Copy from env.sample
+  - [x] Add Telegram API ID and API Hash
+  - [x] Add OpenAI API key
+  - [x] Set source and destination channels
+  - [x] Configure translation style and image generation
 
-### 3. Local Testing
-- [x] Run initial Telegram authentication:
-  - [x] Run `make run` for first-time setup
-  - [x] Enter phone number when prompted
-  - [x] Enter verification code sent to Telegram
-  - [x] Verify session file created
-- [x] Test basic translation:
-  - [x] Check message received from source channel
-  - [x] Verify translation to destination channel
-  - [x] Confirm logs are working
+### 3. Local Development
+- [x] Set up virtual environment:
+  - [x] Install Python 3.11+
+  - [x] Install dependencies via pip
+- [x] First run to create session file
+- [x] Test basic functionality
 
-### 4. Docker Deployment
-- [x] Create directories:
-  - [x] `mkdir -p logs session backups`
-- [x] Set up Docker volumes properly:
-  - [x] Create setup_docker.sh script for session file copying
-  - [x] Update Makefile with setup-docker target
-  - [x] Ensure bot.py can handle Docker non-interactive mode
-- [x] Build Docker container:
-  - [x] `make build`
-- [x] Start service:
-  - [x] `make start` (runs setup-docker automatically)
-- [x] Check container logs:
-  - [x] `make logs`
-- [x] Verify bot is running properly
-- [x] Fix Docker volume permissions on macOS with named volumes
+### 4. Docker Setup
+- [x] Build container
+- [x] Configure volumes for session persistence
+- [x] Set up Docker networking
+- [x] Test Docker deployment
+- [x] Create script for Docker volume setup
 
-### 5. Monitoring & Maintenance
-- [x] Set up basic health check:
-  - [x] Run `./healthcheck.py` to test bot status
-  - [x] Schedule regular checks (cron job)
-- [x] Create backup procedure:
-  - [x] Test `./scripts/backup.sh`
-  - [x] Schedule regular backups
+### 5. Production Deployment
+- [x] Deploy to server
+- [x] Configure systemd service or similar
+- [x] Set up monitoring & healthchecks
+- [x] Configure logging
+- [x] Create backup strategy
 
-### 6. Translation Styles
-- [x] LEFT style (Progressive Russian zoomer):
-  - [x] Modern slang with progressive undertones
-  - [x] Authentic Gen-Z language patterns
-  - [x] Edgy humor with trendy references
-- [x] RIGHT style (Nationalist "bidlo"):
-  - [x] More aggressive and nationalist tone
-  - [x] Traditional values emphasis
-  - [x] Rougher slang with attitude
+### 6. Enhanced Features
+- [x] Multiple translation styles:
+  - [x] LEFT - progressive Russian zoomer slang
+  - [x] RIGHT - nationalist "bidlo" style
+  - [x] Choose style via TRANSLATION_STYLE env var
+- [x] Image generation for posts:
+  - [x] Using DALL-E 3 for context-aware images
+  - [x] Control via GENERATE_IMAGES env var
+- [x] Batch processing:
+  - [x] Process N most recent posts from source channel
+  - [x] Run with `python bot.py --process-recent 10`
+
+### 7. Testing
+- [x] Setup test channels:
+  - [x] Test source channel for posting test content
+  - [x] Test destination for verifying translations
+- [x] Create E2E test script:
+  - [x] Run test with `python test_e2e.py`
+
+## AWS Deployment Instructions
+
+### Setup EC2 Instance
+1. Launch an Amazon EC2 instance:
+   - Recommended: t3.small or larger (2GB RAM minimum)
+   - Ubuntu Server LTS (20.04 or newer)
+   - Add at least 20GB of storage
+
+2. Configure security groups:
+   - Allow SSH (port 22) from your IP
+   - Allow HTTPS (port 443) if using webhook mode
+   - Allow any additional monitoring ports if needed
+
+3. Connect to instance:
+   ```
+   ssh -i your-key.pem ubuntu@your-instance-ip
+   ```
+
+### Install Docker & Docker Compose
+```bash
+# Update packages
+sudo apt update && sudo apt upgrade -y
+
+# Install Docker
+sudo apt install docker.io -y
+sudo systemctl enable --now docker
+sudo usermod -aG docker ubuntu
+
+# Install Docker Compose
+sudo apt install docker-compose -y
+
+# Log out and back in to apply group changes
+exit
+# SSH back in
+```
+
+### Deploy the Bot
+1. Set up project directory:
+   ```bash
+   mkdir -p ~/telegram_zoomer
+   cd ~/telegram_zoomer
+   ```
+
+2. Clone the repository or upload files:
+   ```bash
+   # Option 1: Clone from repository
+   git clone your-repository-url .
+   
+   # Option 2: Upload files via SCP
+   # Run this from your local machine
+   scp -i your-key.pem -r /path/to/telegram_zoomer/* ubuntu@your-instance-ip:~/telegram_zoomer/
+   ```
+
+3. Create .env file:
+   ```bash
+   cp env.sample .env
+   nano .env
+   # Add your API keys and channel information
+   ```
+
+4. Set up session file:
+   - Copy your existing session file to the instance:
+   ```bash
+   # From local machine
+   scp -i your-key.pem /path/to/nyt_to_zoom.session ubuntu@your-instance-ip:~/telegram_zoomer/
+   ```
+
+5. Start services:
+   ```bash
+   cd ~/telegram_zoomer
+   chmod +x setup_docker.sh
+   ./setup_docker.sh
+   docker-compose up -d
+   ```
+
+### Monitoring and Maintenance
+1. Set up a simple health check service:
+   ```bash
+   # Create a script to check if the container is running
+   cat > /home/ubuntu/healthcheck.sh << 'EOL'
+   #!/bin/bash
+   if ! docker ps | grep telegram-zoomer > /dev/null; then
+     cd /home/ubuntu/telegram_zoomer
+     docker-compose up -d
+     echo "Bot restarted at $(date)" >> /home/ubuntu/restart.log
+   fi
+   EOL
+   
+   chmod +x /home/ubuntu/healthcheck.sh
+
+   # Add to crontab
+   (crontab -l 2>/dev/null; echo "*/10 * * * * /home/ubuntu/healthcheck.sh") | crontab -
+   ```
+
+2. Set up log rotation:
+   ```bash
+   sudo apt install logrotate -y
+   
+   sudo cat > /etc/logrotate.d/telegram_zoomer << 'EOL'
+   /home/ubuntu/telegram_zoomer/logs/bot.log {
+     daily
+     rotate 7
+     compress
+     delaycompress
+     missingok
+     notifempty
+     create 640 ubuntu ubuntu
+   }
+   EOL
+   ```
+
+### Automated Backups to S3
+1. Install AWS CLI:
+   ```bash
+   sudo apt install awscli -y
+   ```
+
+2. Configure AWS credentials:
+   ```bash
+   aws configure
+   # Enter your AWS Access Key, Secret Key, region, and output format
+   ```
+
+3. Create a backup script:
+   ```bash
+   cat > /home/ubuntu/backup.sh << 'EOL'
+   #!/bin/bash
+   DATE=$(date +%Y-%m-%d_%H-%M-%S)
+   BACKUP_DIR="/home/ubuntu/backups"
+   mkdir -p $BACKUP_DIR
+   
+   # Backup session and logs
+   tar -czf $BACKUP_DIR/telegram_zoomer_$DATE.tar.gz -C /home/ubuntu/telegram_zoomer session logs
+   
+   # Upload to S3
+   aws s3 cp $BACKUP_DIR/telegram_zoomer_$DATE.tar.gz s3://your-bucket-name/backups/
+   
+   # Clean up old local backups (keep last 5)
+   ls -t $BACKUP_DIR/*.tar.gz | tail -n +6 | xargs -r rm
+   EOL
+   
+   chmod +x /home/ubuntu/backup.sh
+   
+   # Add to crontab for daily backup
+   (crontab -l 2>/dev/null; echo "0 0 * * * /home/ubuntu/backup.sh") | crontab -
+   ```
+
+## Setup Commands Summary
+```bash
+# First-time setup
+pip install -r requirements.txt
+python bot.py  # Create session file
+
+# Docker setup
+make build
+./setup_docker.sh  # Copy session to volume
+make start
+
+# Process recent posts
+python bot.py --process-recent 10
+
+# Run end-to-end test
+python test_e2e.py
+```
 
 ## Docker Troubleshooting
 - [x] Session file copying:
