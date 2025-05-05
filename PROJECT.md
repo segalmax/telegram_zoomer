@@ -279,7 +279,7 @@ python test_e2e.py
 
 ## Authentication Steps
 1. Ensure you have the correct API credentials in your .env file
-2. Run the bot with `python simplified_bot.py`
+2. Run the bot with `python bot.py`
 3. Enter the verification code when prompted
 
 ## Quick Commands
