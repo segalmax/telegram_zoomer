@@ -12,6 +12,7 @@
 - [x] Added ability to process multiple recent posts
 - [x] Added test channels for end-to-end testing
 - [x] AWS deployment instructions
+- [ ] Fix "database is locked" SQLite error on session file access
 
 ## Step-by-Step Deployment Path
 
