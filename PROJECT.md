@@ -70,8 +70,9 @@
 - [x] Setup test channels:
   - [x] Test source channel for posting test content
   - [x] Test destination for verifying translations
-- [x] Create E2E test script:
-  - [x] Run test with `python test_e2e.py`
+- [x] Create test scripts:
+  - [x] Run core test with `python test_core.py` (tests OpenAI integration)
+  - [x] Run e2e test with `python test_e2e.py` (tests Telegram messaging)
 
 ## AWS Deployment Instructions
 
@@ -234,8 +235,9 @@ make start
 # Process recent posts
 python bot.py --process-recent 10
 
-# Run end-to-end test
-python test_e2e.py
+# Testing
+python test_core.py  # Test OpenAI integration
+python test_e2e.py   # Test Telegram posting (requires authentication)
 ```
 
 ## Docker Troubleshooting

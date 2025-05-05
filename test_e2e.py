@@ -2,18 +2,17 @@
 """
 End-to-end test script for Telegram Zoomer Bot with image generation
 
-This script tests the flow from a test source channel to a destination channel
-with image generation and translation.
+This script tests the whole flow from a test source channel to a destination channel.
+First run test_core.py to verify translations before running this test.
 """
 
 import os
 import asyncio
 import logging
+import time
+import uuid
 from dotenv import load_dotenv
 from telethon import TelegramClient, events
-import openai
-from translator import get_openai_client, translate_text
-from image_generator import generate_image_for_post
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
@@ -25,23 +24,14 @@ load_dotenv()
 # Configuration - using test channels instead of production ones
 API_ID = int(os.getenv('TG_API_ID'))
 API_HASH = os.getenv('TG_API_HASH')
-OPENAI_KEY = os.getenv('OPENAI_API_KEY')
-SESSION = os.getenv('TG_SESSION', 'nyt_to_zoom')
+TG_PHONE = os.getenv('TG_PHONE')
+SESSION = f"test_session_{uuid.uuid4().hex[:8]}"  # Create unique session file for testing
 TEST_SRC_CHANNEL = os.getenv('TEST_SRC_CHANNEL', 'nyttest')         # Test source channel
 TEST_DST_CHANNEL = os.getenv('TEST_DST_CHANNEL', 'nytzoomerutest')  # Test destination channel
 
-# Initialize OpenAI client
-client = get_openai_client(OPENAI_KEY)
-
 async def post_test_message(tg_client):
     """Post a test message to the test source channel"""
-    test_message = (
-        "BREAKING NEWS: Scientists discover new species of deep-sea creatures "
-        "near hydrothermal vents in the Pacific Ocean. The previously unknown "
-        "organisms display remarkable adaptation to extreme pressure and "
-        "temperature conditions, potentially offering insights into the "
-        "evolution of life on Earth and beyond."
-    )
+    test_message = "Test message from e2e test: " + str(uuid.uuid4())
     
     try:
         logger.info(f"Posting test message to {TEST_SRC_CHANNEL}")
@@ -52,97 +42,44 @@ async def post_test_message(tg_client):
         logger.error(f"Error posting test message: {str(e)}")
         return False
 
-async def translate_and_post_with_image(tg_client, text):
-    """Translate text and post to destination channel with image"""
-    try:
-        # Generate image based on post content
-        logger.info("Generating image for post...")
-        result = await generate_image_for_post(client, text)
-        
-        image_data = None
-        image_url = None
-        
-        if result:
-            if isinstance(result, str):
-                # It's a URL
-                image_url = result
-                logger.info(f"Using image URL: {image_url[:100]}...")
-            else:
-                # It's BytesIO data
-                image_data = result
-                logger.info("Image data received successfully")
-        else:
-            logger.error("Failed to generate image")
-            
-        # Translate in both styles
-        logger.info("Translating in LEFT style...")
-        left = await translate_text(client, text, 'left')
-        logger.info(f"LEFT translation snippet: {left[:100]}...")
-        
-        # Post header, image, and translation
-        await tg_client.send_message(TEST_DST_CHANNEL, "🟢 LEFT-ZOOMER TEST VERSION:")
-        
-        if image_data:
-            # Post with image data
-            await tg_client.send_file(TEST_DST_CHANNEL, image_data, caption=left[:1024])
-            logger.info("Posted left-leaning version with image data")
-        elif image_url:
-            # Post with image URL
-            left_with_url = f"{left}\n\n🖼️ {image_url}"
-            await tg_client.send_message(TEST_DST_CHANNEL, left_with_url)
-            logger.info("Posted left-leaning version with image URL")
-        else:
-            # Post text only
-            await tg_client.send_message(TEST_DST_CHANNEL, left)
-            logger.info("Posted left-leaning version (text only)")
-        
-        logger.info("Translating in RIGHT style...")
-        right = await translate_text(client, text, 'right')
-        logger.info(f"RIGHT translation snippet: {right[:100]}...")
-        
-        # Post right-wing version
-        await tg_client.send_message(TEST_DST_CHANNEL, "🔴 RIGHT-BIDLO TEST VERSION:")
-        await tg_client.send_message(TEST_DST_CHANNEL, right)
-        logger.info("Posted right-wing version")
-        
-        return True
-    except Exception as e:
-        logger.error(f"Error in translate_and_post: {str(e)}")
-        return False
-
 async def main():
     """Main test function"""
     logger.info("Starting end-to-end test")
     
     # Verify required environment variables
-    if not all([API_ID, API_HASH, OPENAI_KEY, TEST_SRC_CHANNEL, TEST_DST_CHANNEL]):
+    if not all([API_ID, API_HASH, TG_PHONE, TEST_SRC_CHANNEL, TEST_DST_CHANNEL]):
         logger.error("Missing required environment variables")
         return
     
-    # Create client
+    # Create client with unique session
     tg_client = TelegramClient(SESSION, API_ID, API_HASH)
     
     try:
-        await tg_client.start()
-        logger.info("Telegram client started")
+        # Start from scratch with a new session
+        await tg_client.start(phone=TG_PHONE)
+        logger.info("Telegram client connected and authenticated")
         
-        # Post a test message to source channel
-        if await post_test_message(tg_client):
-            # Wait a moment to ensure message is processed
-            await asyncio.sleep(2)
+        # Post a test message
+        result = await post_test_message(tg_client)
+        if result:
+            logger.info("✅ E2E test passed - message posted successfully")
+        else:
+            logger.error("❌ E2E test failed - could not post message")
             
-            # Get the most recent message from test source channel
-            async for message in tg_client.iter_messages(TEST_SRC_CHANNEL, limit=1):
-                if message and message.text:
-                    logger.info(f"Processing test message: {message.text[:50]}...")
-                    await translate_and_post_with_image(tg_client, message.text)
-                    break
-            
-        logger.info("End-to-end test completed")
     except Exception as e:
         logger.error(f"Test failed: {str(e)}")
     finally:
         await tg_client.disconnect()
+        logger.info("Test cleanup complete, session file will be automatically removed")
+        # Remove the temporary session file
+        try:
+            os.remove(f"{SESSION}.session")
+            logger.info(f"Removed temporary session file")
+        except:
+            pass
 
 if __name__ == "__main__":
+    logger.info("Note: This test requires interactive authentication.")
+    logger.info("If you don't want to authenticate, use test_core.py instead.")
+    input("Press Enter to continue with the test (or Ctrl+C to cancel)...")
     asyncio.run(main()) 
