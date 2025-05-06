@@ -9,10 +9,115 @@ import asyncio
 import ssl
 import certifi
 import time
+import json
+import base64
 from io import BytesIO
 import platform
+from dotenv import load_dotenv
+
+load_dotenv()
 
 logger = logging.getLogger(__name__)
+
+async def generate_image_with_stability_ai(text, max_length=100):
+    """
+    Generate an image using Stability AI's API
+    
+    Args:
+        text: Text of the post to generate an image for
+        max_length: Maximum length of text to use for image prompt
+    
+    Returns:
+        BytesIO object containing the image or None if generation failed
+    """
+    try:
+        start_time = time.time()
+        logger.info(f"Starting Stability AI image generation for text: {text[:30]}...")
+        
+        api_key = os.getenv("STABILITY_AI_API_KEY")
+        if not api_key:
+            logger.error("STABILITY_AI_API_KEY not found in environment variables")
+            return None
+        
+        # Create a prompt based on the post text
+        short_text = text[:max_length] + "..." if len(text) > max_length else text
+        
+        # Create a funny, bold and relevant prompt for Stability AI
+        prompt = f"Create a satirical, bold news illustration for this headline: {short_text}. Style: bold colors, exaggerated features, humorous tone, journalistic caricature, highly detailed, digital art"
+        
+        logger.info(f"Generated Stability AI prompt: {prompt[:100]}...")
+        
+        # API endpoint
+        api_host = "https://api.stability.ai"
+        engine_id = "stable-diffusion-xl-1024-v1-0"
+        
+        # Prepare the request
+        url = f"{api_host}/v1/generation/{engine_id}/text-to-image"
+        
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "Authorization": f"Bearer {api_key}"
+        }
+        
+        payload = {
+            "text_prompts": [{"text": prompt}],
+            "cfg_scale": 7,
+            "height": 1024,
+            "width": 1024,
+            "samples": 1,
+            "steps": 30,
+            "style_preset": "comic-book"
+        }
+        
+        # Create SSL context with proper certificates for macOS
+        ssl_context = None
+        if platform.system() == 'Darwin':  # macOS
+            logger.info("Using macOS SSL context with certifi for Stability AI API")
+            ssl_context = ssl.create_default_context(cafile=certifi.where())
+        
+        # Make the API request
+        logger.info("Sending request to Stability AI API...")
+        api_start_time = time.time()
+        connector = aiohttp.TCPConnector(ssl=ssl_context)
+        
+        async with aiohttp.ClientSession(connector=connector) as session:
+            try:
+                async with session.post(url, headers=headers, json=payload, timeout=90) as resp:
+                    status = resp.status
+                    logger.info(f"Stability AI API response status: {status}")
+                    
+                    if status == 200:
+                        response_data = await resp.json()
+                        api_duration = time.time() - api_start_time
+                        logger.info(f"Stability AI API request completed in {api_duration:.2f} seconds")
+                        
+                        # Process the response
+                        if "artifacts" in response_data and len(response_data["artifacts"]) > 0:
+                            image_data_b64 = response_data["artifacts"][0]["base64"]
+                            image_data = base64.b64decode(image_data_b64)
+                            
+                            total_duration = time.time() - start_time
+                            logger.info(f"Total Stability AI image generation completed in {total_duration:.2f} seconds")
+                            return BytesIO(image_data)
+                        else:
+                            logger.error("No image artifacts found in Stability AI response")
+                            return None
+                    else:
+                        error_text = await resp.text()
+                        logger.error(f"Failed to generate image: HTTP {status}")
+                        logger.error(f"Response: {error_text}")
+                        return None
+            except asyncio.TimeoutError:
+                logger.error("Timeout occurred while calling Stability AI API")
+                return None
+            except Exception as api_err:
+                logger.error(f"Stability AI API error: {str(api_err)}", exc_info=True)
+                return None
+                
+    except Exception as e:
+        logger.error(f"Error in generate_image_with_stability_ai: {str(e)}", exc_info=True)
+        return None
 
 async def generate_image_for_post(client, text, max_length=100):
     """
@@ -26,9 +131,16 @@ async def generate_image_for_post(client, text, max_length=100):
     Returns:
         BytesIO object containing the image or None if generation failed
     """
+    # Check if we should use Stability AI
+    use_stability = os.getenv("USE_STABILITY_AI", "false").lower() == "true"
+    
+    if use_stability:
+        logger.info("Using Stability AI for image generation")
+        return await generate_image_with_stability_ai(text, max_length)
+    
     try:
         start_time = time.time()
-        logger.info(f"Starting image generation for text: {text[:30]}...")
+        logger.info(f"Starting DALL-E image generation for text: {text[:30]}...")
         
         # Create a prompt based on the post text
         # Truncate post text to prevent overly long prompts
