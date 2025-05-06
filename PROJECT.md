@@ -12,9 +12,13 @@
 - [x] Added ability to process multiple recent posts
 - [x] Added test channels for end-to-end testing
 - [x] AWS deployment instructions
+- [x] Add original NYT article links to translated posts
+- [x] Implement Stability AI image generation for more creative/funny images
+- [x] Create robust end-to-end testing with production code
+- [x] Verified posts appearing correctly in destination channels
+- [x] Fixed test destination channel selection in test pipeline
 - [ ] Fix "database is locked" SQLite error on session file access
-- [ ] Add original NYT article links to translated posts
-- [ ] Improve image generation for more realistic caricatures/satirical style
+- [ ] Further improve image generation prompts for better results
 
 ## Step-by-Step Deployment Path
 
@@ -27,12 +31,16 @@
   - [x] Create API key in dashboard
   - [x] Set usage limits ($10/day recommended)
   - [x] Copy key to a secure location
+- [x] Stability AI API setup:
+  - [x] Create API key at platform.stability.ai
+  - [x] Add to .env file as STABILITY_AI_API_KEY
 
 ### 2. Configure Environment
 - [x] Create .env file with credentials:
   - [x] Copy from env.sample
   - [x] Add Telegram API ID and API Hash
   - [x] Add OpenAI API key
+  - [x] Add Stability AI API key
   - [x] Set source and destination channels
   - [x] Configure translation style and image generation
 
@@ -63,19 +71,26 @@
   - [x] RIGHT - nationalist "bidlo" style
   - [x] Choose style via TRANSLATION_STYLE env var
 - [x] Image generation for posts:
-  - [x] Using DALL-E 3 for context-aware images
+  - [x] Using DALL-E 3 for context-aware images (default)
+  - [x] Using Stability AI for more creative and funny images (set USE_STABILITY_AI=true)
   - [x] Control via GENERATE_IMAGES env var
 - [x] Batch processing:
   - [x] Process N most recent posts from source channel
   - [x] Run with `python bot.py --process-recent 10`
+- [x] Source attribution:
+  - [x] Automatically extract and include original NYTimes links
+  - [x] Display source links at the end of translated posts
 
 ### 7. Testing
 - [x] Setup test channels:
   - [x] Test source channel for posting test content
   - [x] Test destination for verifying translations
 - [x] Create test scripts:
-  - [x] Run core test with `python test_core.py` (tests OpenAI integration)
-  - [x] Run e2e test with `python test_e2e.py` (tests Telegram messaging)
+  - [x] Unified test script with modes:
+    - API Integration: `python test.py api` (tests OpenAI/Stability API)
+    - Telegram Pipeline: `python test.py telegram` (tests full message flow)
+    - All Tests: `python test.py all` (runs all tests in sequence)
+  - [x] Support command-line flags like `--stability` and `--no-images`
 
 ## AWS Deployment Instructions
 
@@ -239,8 +254,9 @@ make start
 python bot.py --process-recent 10
 
 # Testing
-python test_core.py  # Test OpenAI integration
-python test_e2e.py   # Test Telegram posting (requires authentication)
+python test.py api          # Test API integration (OpenAI/Stability AI)
+python test.py telegram     # Test Telegram pipeline (requires authentication)
+python test.py all          # Run all tests in sequence
 ```
 
 ## Docker Troubleshooting

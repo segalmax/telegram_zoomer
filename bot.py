@@ -4,6 +4,7 @@ import logging
 import time
 import sys
 import uuid
+import re
 from telethon import TelegramClient, events
 from telethon.network import ConnectionTcpAbridged
 import openai
@@ -31,15 +32,43 @@ SRC_CHANNEL = os.getenv('SRC_CHANNEL')
 DST_CHANNEL = os.getenv('DST_CHANNEL')
 TRANSLATION_STYLE = os.getenv('TRANSLATION_STYLE', 'both')
 GENERATE_IMAGES = os.getenv('GENERATE_IMAGES', 'true').lower() == 'true'
+USE_STABILITY_AI = os.getenv('USE_STABILITY_AI', 'false').lower() == 'true'
 
 # Initialize OpenAI client
 openai_client = get_openai_client(OPENAI_KEY)
 
-async def translate_and_post(client, txt, message_id=None):
+def extract_nytimes_link(text):
+    """Extract NYTimes link from the post text"""
+    # Pattern to match NYTimes URLs
+    nyt_patterns = [
+        r'https?://(?:www\.)?nytimes\.com/\S+',
+        r'https?://(?:www\.)?nyti\.ms/\S+'
+    ]
+    
+    for pattern in nyt_patterns:
+        match = re.search(pattern, text)
+        if match:
+            return match.group(0)
+    
+    return None
+
+async def translate_and_post(client, txt, message_id=None, original_url=None, destination_channel=None):
     """Translate text and post to destination channel with optional image"""
     try:
         start_time = time.time()
         logger.info(f"Starting translation and posting for message ID: {message_id}")
+        
+        # Use provided destination channel or default to environment variable
+        dst_channel = destination_channel or DST_CHANNEL
+        logger.info(f"Using destination channel: {dst_channel}")
+        
+        # Extract NYTimes link if not provided
+        if not original_url:
+            original_url = extract_nytimes_link(txt)
+            if original_url:
+                logger.info(f"Extracted NYTimes URL: {original_url}")
+            else:
+                logger.info("No NYTimes URL found in the message")
         
         image_data = None
         image_url = None
@@ -62,6 +91,12 @@ async def translate_and_post(client, txt, message_id=None):
             else:
                 logger.warning("No image result was returned")
         
+        # Create source attribution footer
+        source_footer = ""
+        if original_url:
+            source_footer = f"\n\n🔗 Оригинал: {original_url}"
+            logger.info("Added source attribution footer with NYTimes link")
+        
         if TRANSLATION_STYLE == 'both':
             # Translate both styles and post both
             logger.info("Translating in LEFT style...")
@@ -70,25 +105,34 @@ async def translate_and_post(client, txt, message_id=None):
             logger.info(f"LEFT translation completed in {time.time() - translation_start:.2f} seconds")
             logger.info(f"LEFT translation snippet: {left[:100]}...")
             
+            # Add source footer to left translation
+            left_with_source = left + source_footer if source_footer else left
+            
             # Post header, image (if available), and translation
             logger.info("Posting LEFT translation to destination channel...")
-            await client.send_message(DST_CHANNEL, "🟢 LEFT-ZOOMER VERSION:")
+            await client.send_message(dst_channel, "🟢 LEFT-ZOOMER VERSION:")
             
             if image_data:
-                # Post with image data
+                # Post with image data - caption limited to 1024 chars
                 logger.info("Posting with image data...")
-                await client.send_file(DST_CHANNEL, image_data, caption=left[:1024])
+                caption = left[:1024 - len(source_footer)] + source_footer if source_footer else left[:1024]
+                await client.send_file(dst_channel, image_data, caption=caption)
+                
+                # If caption was truncated due to length, send the rest as a separate message
+                if len(left) > 1024 - len(source_footer):
+                    await client.send_message(dst_channel, left[1024 - len(source_footer):] + source_footer)
+                
                 logger.info("LEFT translation with image posted successfully")
             elif image_url:
                 # Post left translation with the image URL
                 logger.info("Posting with image URL...")
-                left_with_url = f"{left}\n\n🖼️ {image_url}"
-                await client.send_message(DST_CHANNEL, left_with_url)
+                left_with_url = f"{left}\n\n🖼️ {image_url}{source_footer}"
+                await client.send_message(dst_channel, left_with_url)
                 logger.info("LEFT translation with image URL posted successfully")
             else:
                 # Post only text
                 logger.info("Posting text only...")
-                await client.send_message(DST_CHANNEL, left)
+                await client.send_message(dst_channel, left_with_source)
                 logger.info("LEFT translation (text only) posted successfully")
             
             logger.info("Posted left-leaning version")
@@ -99,10 +143,13 @@ async def translate_and_post(client, txt, message_id=None):
             logger.info(f"RIGHT translation completed in {time.time() - translation_start:.2f} seconds")
             logger.info(f"RIGHT translation snippet: {right[:100]}...")
             
+            # Add source footer to right translation
+            right_with_source = right + source_footer if source_footer else right
+            
             # Post header and translation (reuse image from first post)
             logger.info("Posting RIGHT translation to destination channel...")
-            await client.send_message(DST_CHANNEL, "🔴 RIGHT-BIDLO VERSION:")
-            await client.send_message(DST_CHANNEL, right)
+            await client.send_message(dst_channel, "🔴 RIGHT-BIDLO VERSION:")
+            await client.send_message(dst_channel, right_with_source)
             logger.info("RIGHT translation posted successfully")
             logger.info("Posted right-wing version")
         else:
@@ -114,24 +161,33 @@ async def translate_and_post(client, txt, message_id=None):
             logger.info(f"{style.upper()} translation completed in {time.time() - translation_start:.2f} seconds")
             logger.info(f"Translation snippet: {zoomer[:100]}...")
             
+            # Add source footer
+            zoomer_with_source = zoomer + source_footer if source_footer else zoomer
+            
             header = "🟢 LEFT-ZOOMER VERSION:" if style == 'left' else "🔴 RIGHT-BIDLO VERSION:"
-            await client.send_message(DST_CHANNEL, header)
+            await client.send_message(dst_channel, header)
             
             if image_data:
-                # Post with image data
+                # Post with image data - caption limited to 1024 chars
                 logger.info("Posting with image data...")
-                await client.send_file(DST_CHANNEL, image_data, caption=zoomer[:1024])
+                caption = zoomer[:1024 - len(source_footer)] + source_footer if source_footer else zoomer[:1024]
+                await client.send_file(dst_channel, image_data, caption=caption)
+                
+                # If caption was truncated due to length, send the rest as a separate message
+                if len(zoomer) > 1024 - len(source_footer):
+                    await client.send_message(dst_channel, zoomer[1024 - len(source_footer):] + source_footer)
+                
                 logger.info("Translation with image posted successfully")
             elif image_url:
                 # Post with image URL
                 logger.info("Posting with image URL...")
-                zoomer_with_url = f"{zoomer}\n\n🖼️ {image_url}"
-                await client.send_message(DST_CHANNEL, zoomer_with_url)
+                zoomer_with_url = f"{zoomer}\n\n🖼️ {image_url}{source_footer}"
+                await client.send_message(dst_channel, zoomer_with_url)
                 logger.info("Translation with image URL posted successfully")
             else:
                 # Post only text
                 logger.info("Posting text only...")
-                await client.send_message(DST_CHANNEL, zoomer)
+                await client.send_message(dst_channel, zoomer_with_source)
                 logger.info("Translation (text only) posted successfully")
             
             logger.info("Message successfully posted to destination channel")
@@ -153,7 +209,19 @@ async def setup_event_handlers(client):
                 return
 
             logger.info(f"Processing message: {txt[:50]}...")
-            await translate_and_post(client, txt, event.message.id)
+            
+            # Extract URL from message entities if available
+            original_url = None
+            if event.message.entities:
+                for entity in event.message.entities:
+                    if hasattr(entity, 'url'):
+                        url = entity.url
+                        if 'nytimes.com' in url or 'nyti.ms' in url:
+                            original_url = url
+                            logger.info(f"Found NYTimes URL in message entities: {original_url}")
+                            break
+            
+            await translate_and_post(client, txt, event.message.id, original_url)
             
         except Exception as e:
             logger.error(f"Error processing message: {str(e)}", exc_info=True)
@@ -231,7 +299,13 @@ async def process_recent_posts(client, limit=10, timeout=300):
                 processing_timeout = min(180, (timeout - (time.time() - start_time)) / 2)
                 logger.info(f"Setting per-message timeout of {processing_timeout:.2f} seconds")
                 
-                process_task = asyncio.create_task(translate_and_post(client, msg.text, msg.id))
+                process_task = asyncio.create_task(
+                    translate_and_post(
+                        client,
+                        msg.text,
+                        msg.id
+                    )
+                )
                 success = await asyncio.wait_for(process_task, timeout=processing_timeout)
                 
                 if success:
@@ -253,6 +327,43 @@ async def process_recent_posts(client, limit=10, timeout=300):
         logger.error(f"Error in batch processing: {str(e)}", exc_info=True)
         return 0
 
+async def ping_server(client):
+    """Periodically ping server to maintain connection"""
+    logger.info("Starting background ping process...")
+    while True:
+        try:
+            if not client.is_connected():
+                logger.warning("Connection lost, attempting to reconnect...")
+                await client.connect()
+                
+            # Perform a simple operation to check connection
+            me = await client.get_me()
+            if me:
+                logger.info(f"Ping successful - connected as {me.first_name}")
+            else:
+                logger.warning("Ping failed - no user info returned")
+                
+            # Check if client is receiving updates
+            if not client.is_connected():
+                logger.warning("Client disconnected during ping")
+        except Exception as e:
+            logger.error(f"Error during ping: {str(e)}")
+            try:
+                logger.info("Attempting to reconnect...")
+                await client.disconnect()
+                await asyncio.sleep(5)  # Wait 5 seconds before reconnecting
+                await client.connect()
+                # Check if reconnection was successful
+                if await client.is_user_authorized():
+                    logger.info("Successfully reconnected and authorized")
+                else:
+                    logger.error("Reconnection failed - not authorized")
+            except Exception as reconnect_error:
+                logger.error(f"Reconnection attempt failed: {str(reconnect_error)}")
+        
+        # Wait 5 minutes before next ping
+        await asyncio.sleep(300)
+
 async def run_bot():
     """Main function to run the bot"""
     logger.info("Starting Telegram Zoomer bot")
@@ -272,7 +383,9 @@ async def run_bot():
             system_version="macOS 14",
             app_version="Telegram Zoomer Bot 1.0",
             receive_updates=True,
-            auto_reconnect=True
+            auto_reconnect=True,
+            retry_delay=5,
+            connection_retries=10
         )
         
         # Connect with timeout
@@ -334,10 +447,59 @@ async def run_bot():
         logger.info(f"Listening for new posts from {SRC_CHANNEL}")
         logger.info(f"Translation style: {TRANSLATION_STYLE}")
         logger.info(f"Generate images: {GENERATE_IMAGES}")
-        await setup_event_handlers(client)
+        
+        # Define and register the event handler directly
+        @client.on(events.NewMessage(chats=SRC_CHANNEL))
+        async def message_handler(event):
+            """Process new messages from the source channel"""
+            try:
+                txt = event.message.message
+                if not txt:
+                    return
+
+                logger.info(f"Processing message: {txt[:50]}...")
+                
+                # Extract URL from message entities if available
+                original_url = None
+                if event.message.entities:
+                    for entity in event.message.entities:
+                        if hasattr(entity, 'url'):
+                            url = entity.url
+                            if 'nytimes.com' in url or 'nyti.ms' in url:
+                                original_url = url
+                                logger.info(f"Found NYTimes URL in message entities: {original_url}")
+                                break
+                
+                await translate_and_post(client, txt, event.message.id, original_url)
+                
+            except Exception as e:
+                logger.error(f"Error processing message: {str(e)}", exc_info=True)
+        
+        # Verify event handler is listening
+        logger.info("Verifying event handler registration...")
+        registered_handlers = [h for h in client.list_event_handlers() if isinstance(h[0], events.NewMessage.Event)]
+        if registered_handlers:
+            logger.info(f"Registered {len(registered_handlers)} event handlers")
+        else:
+            logger.warning("No event handlers registered! Bot won't respond to new messages.")
+        
+        # Start ping task in background
+        ping_task = asyncio.create_task(ping_server(client))
         
         # Run the client until disconnected
-        await client.run_until_disconnected()
+        try:
+            logger.info("Starting main event loop")
+            await client.run_until_disconnected()
+        except Exception as e:
+            logger.error(f"Error in main event loop: {str(e)}")
+        finally:
+            # Cancel ping task
+            if not ping_task.done():
+                ping_task.cancel()
+                try:
+                    await ping_task
+                except asyncio.CancelledError:
+                    pass
     except Exception as e:
         logger.error(f"Bot error: {str(e)}", exc_info=True)
     finally:
