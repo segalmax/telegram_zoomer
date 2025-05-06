@@ -448,38 +448,17 @@ async def run_bot():
         logger.info(f"Translation style: {TRANSLATION_STYLE}")
         logger.info(f"Generate images: {GENERATE_IMAGES}")
         
-        # Define and register the event handler directly
-        @client.on(events.NewMessage(chats=SRC_CHANNEL))
-        async def message_handler(event):
-            """Process new messages from the source channel"""
-            try:
-                txt = event.message.message
-                if not txt:
-                    return
-
-                logger.info(f"Processing message: {txt[:50]}...")
-                
-                # Extract URL from message entities if available
-                original_url = None
-                if event.message.entities:
-                    for entity in event.message.entities:
-                        if hasattr(entity, 'url'):
-                            url = entity.url
-                            if 'nytimes.com' in url or 'nyti.ms' in url:
-                                original_url = url
-                                logger.info(f"Found NYTimes URL in message entities: {original_url}")
-                                break
-                
-                await translate_and_post(client, txt, event.message.id, original_url)
-                
-            except Exception as e:
-                logger.error(f"Error processing message: {str(e)}", exc_info=True)
+        # Register the event handler directly
+        await setup_event_handlers(client)
         
         # Verify event handler is listening
         logger.info("Verifying event handler registration...")
-        registered_handlers = [h for h in client.list_event_handlers() if isinstance(h[0], events.NewMessage.Event)]
+        registered_handlers = client.list_event_handlers()
         if registered_handlers:
             logger.info(f"Registered {len(registered_handlers)} event handlers")
+            for handler in registered_handlers:
+                if isinstance(handler[0], events.NewMessage.Event):
+                    logger.info(f"Found NewMessage handler for chats: {handler[0].chats}")
         else:
             logger.warning("No event handlers registered! Bot won't respond to new messages.")
         
