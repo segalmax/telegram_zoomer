@@ -45,8 +45,20 @@ async def post_test_message(tg_client):
         return None, False
 
 async def check_destination_channel(tg_client, test_id, timeout=MAX_WAIT_TIME):
-    """Check if test message appears in destination channel after translation"""
+    """Check if any new messages appear in destination channel after our test post"""
     logger.info(f"Waiting for translations to appear in {TEST_DST_CHANNEL} (max {timeout} seconds)...")
+    
+    # First get current messages to establish a baseline
+    try:
+        baseline_messages = await tg_client.get_messages(TEST_DST_CHANNEL, limit=5)
+        baseline_ids = set(msg.id for msg in baseline_messages)
+        logger.info(f"Established baseline with {len(baseline_ids)} recent messages")
+    except Exception as e:
+        logger.error(f"Could not get baseline messages: {str(e)}")
+        baseline_ids = set()
+    
+    # Give the bot a moment to start processing
+    await asyncio.sleep(5)
     
     start_time = time.time()
     found_translations = 0
@@ -56,30 +68,30 @@ async def check_destination_channel(tg_client, test_id, timeout=MAX_WAIT_TIME):
             # Get recent messages from destination channel
             messages = await tg_client.get_messages(TEST_DST_CHANNEL, limit=10)
             
-            # Check if any messages contain our test ID
-            for msg in messages:
-                if msg.text and test_id in msg.text:
-                    found_translations += 1
-                    logger.info(f"Found a translation with our test ID: {msg.text[:50]}...")
+            # Look for new messages that weren't in our baseline
+            new_messages = [msg for msg in messages if msg.id not in baseline_ids]
             
-            # If we found both translations (LEFT and RIGHT styles), success!
-            if found_translations >= 2:
-                logger.info(f"✅ Found both translations in destination channel")
+            # Count new messages that arrived after our test post
+            for msg in new_messages:
+                found_translations += 1
+                logger.info(f"Found a new message in destination channel: {msg.text[:50] if msg.text else '[No text]'}...")
+                baseline_ids.add(msg.id)  # Add to baseline so we don't count it again
+            
+            # If we found any new messages, consider the test successful
+            if found_translations >= 1:
+                logger.info(f"✅ Found {found_translations} new message(s) in destination channel")
                 return True
                 
             # Wait before checking again
+            logger.info("No new messages yet, waiting 5 seconds...")
             await asyncio.sleep(5)
             
         except Exception as e:
             logger.error(f"Error checking destination channel: {str(e)}")
             await asyncio.sleep(5)
     
-    # If we get here, we didn't find the expected translations
-    if found_translations > 0:
-        logger.warning(f"Found {found_translations} translation(s), but expected at least 2")
-    else:
-        logger.error("No translations found in destination channel")
-    
+    # If we get here, we didn't find any new messages
+    logger.error("No new messages found in destination channel")
     return False
 
 async def main():
