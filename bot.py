@@ -3,6 +3,7 @@ import asyncio
 import logging
 import time
 import sys
+import uuid
 from telethon import TelegramClient, events
 from telethon.network import ConnectionTcpAbridged
 import openai
@@ -24,7 +25,8 @@ logger = logging.getLogger(__name__)
 API_ID = int(os.getenv('TG_API_ID'))
 API_HASH = os.getenv('TG_API_HASH')
 OPENAI_KEY = os.getenv('OPENAI_API_KEY')
-SESSION = os.getenv('TG_SESSION', 'nyt_to_zoom')
+TG_PHONE = os.getenv('TG_PHONE')
+SESSION = os.getenv('TG_SESSION', 'new_session')  # Use the authenticated session
 SRC_CHANNEL = os.getenv('SRC_CHANNEL')
 DST_CHANNEL = os.getenv('DST_CHANNEL')
 TRANSLATION_STYLE = os.getenv('TRANSLATION_STYLE', 'both')
@@ -255,7 +257,9 @@ async def run_bot():
     """Main function to run the bot"""
     logger.info("Starting Telegram Zoomer bot")
     logger.info(f"Python version: {sys.version}")
+    logger.info(f"Using session file: {SESSION}")
     
+    client = None
     try:
         # Create client with ConnectionTcpAbridged (more reliable than default)
         logger.info("Connecting to Telegram...")
@@ -266,7 +270,9 @@ async def run_bot():
             connection=ConnectionTcpAbridged,
             device_model="Macbook",
             system_version="macOS 14",
-            app_version="Telegram Zoomer Bot 1.0"
+            app_version="Telegram Zoomer Bot 1.0",
+            receive_updates=True,
+            auto_reconnect=True
         )
         
         # Connect with timeout
@@ -276,43 +282,35 @@ async def run_bot():
             logger.info("Connected successfully")
         except asyncio.TimeoutError:
             logger.error("Timed out while connecting to Telegram")
+            if client and client.is_connected():
+                await client.disconnect()
             return
         
-        # Check if already authorized
+        # Check if already authorized - we should be using an authenticated session
         if not await client.is_user_authorized():
-            logger.info("Not authorized yet, sending code request")
-            
-            # Request authorization code with timeout
-            try:
-                phone_task = asyncio.create_task(client.send_code_request(os.getenv('TG_PHONE')))
-                await asyncio.wait_for(phone_task, timeout=30)
-                logger.info("Code request sent successfully")
-            except asyncio.TimeoutError:
-                logger.error("Timed out while sending code request")
-                return
-            
-            try:
-                # Start client with phone auth
-                # This will prompt for verification code in console
-                await client.start(phone=os.getenv('TG_PHONE'))
-                logger.info("Authenticated successfully")
-            except Exception as e:
-                logger.error(f"Authentication failed: {str(e)}")
-                return
-        else:
-            logger.info("Already authorized")
-            
-            # Start client (this ensures proper connection)
-            try:
-                start_task = asyncio.create_task(client.start())
-                await asyncio.wait_for(start_task, timeout=30)
-                logger.info("Successfully authorized - ready to process messages")
-            except asyncio.TimeoutError:
-                logger.error("Timed out while starting client")
-                return
-            except Exception as e:
-                logger.error(f"Error starting client: {str(e)}")
-                return
+            logger.error("Session file is not authorized. Please run scripts/complete_auth.py first.")
+            if client and client.is_connected():
+                await client.disconnect()
+            return
+        
+        # We're authenticated, start the client properly
+        logger.info("Already authorized") 
+        
+        # Start client (this ensures proper connection)
+        try:
+            start_task = asyncio.create_task(client.start())
+            await asyncio.wait_for(start_task, timeout=30)
+            logger.info("Successfully authorized - ready to process messages")
+        except asyncio.TimeoutError:
+            logger.error("Timed out while starting client")
+            if client and client.is_connected():
+                await client.disconnect()
+            return
+        except Exception as e:
+            logger.error(f"Error starting client: {str(e)}")
+            if client and client.is_connected():
+                await client.disconnect()
+            return
                 
         # Check command line arguments
         import argparse
@@ -328,7 +326,8 @@ async def run_bot():
             except Exception as e:
                 logger.error(f"Error in batch processing: {str(e)}")
             finally:
-                await client.disconnect()
+                if client and client.is_connected():
+                    await client.disconnect()
                 return
         
         # Set up event handlers for continuous mode
@@ -343,6 +342,13 @@ async def run_bot():
         logger.error(f"Bot error: {str(e)}", exc_info=True)
     finally:
         logger.info("Bot stopped")
+        # Ensure client is properly disconnected to avoid DB locks
+        if client and client.is_connected():
+            try:
+                await client.disconnect()
+                logger.info("Client disconnected")
+            except Exception as e:
+                logger.error(f"Error disconnecting client: {str(e)}")
 
 if __name__ == "__main__":
     try:
