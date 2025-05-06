@@ -19,104 +19,108 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-async def generate_image_with_stability_ai(text, max_length=100):
-    """
-    Generate an image using Stability AI's API
-    
-    Args:
-        text: Text of the post to generate an image for
-        max_length: Maximum length of text to use for image prompt
-    
-    Returns:
-        BytesIO object containing the image or None if generation failed
-    """
+async def generate_image_with_stability_ai(text, style="cartoon"):
+    """Generate an image using Stability AI API based on post content"""
     try:
-        start_time = time.time()
-        logger.info(f"Starting Stability AI image generation for text: {text[:30]}...")
+        # Maximum context length
+        MAX_CHARS = 1000
         
-        api_key = os.getenv("STABILITY_AI_API_KEY")
+        # Get API key from environment
+        api_key = os.environ.get("STABILITY_AI_API_KEY")
         if not api_key:
             logger.error("STABILITY_AI_API_KEY not found in environment variables")
             return None
+            
+        # Use first paragraph or truncate long text
+        text_for_prompt = text[:MAX_CHARS].strip()
         
-        # Create a prompt based on the post text
-        short_text = text[:max_length] + "..." if len(text) > max_length else text
+        # Choose style template based on parameter
+        style_templates = {
+            "cartoon": {
+                "prefix": "Create a funny satirical cartoon illustrating this news story:",
+                "suffix": "Use exaggerated caricature style with bold colors and humorous details. Make it like a political cartoon with clear visual metaphors.",
+                "style_preset": "comic-book",
+                "cfg_scale": 12,
+                "steps": 50
+            },
+            "meme": {
+                "prefix": "Create a humorous meme-style image about this news:",
+                "suffix": "Make it visually striking and funny, with bright colors and an absurdist take on the news.",
+                "style_preset": "photographic",
+                "cfg_scale": 8,
+                "steps": 40
+            },
+            "infographic": {
+                "prefix": "Create a satirical infographic about this news story:",
+                "suffix": "Use simplified iconography, charts and visualizations with a humorous twist. Should look like an exaggerated news graphic.",
+                "style_preset": "digital-art",
+                "cfg_scale": 10,
+                "steps": 40
+            }
+        }
         
-        # Create a funny, bold and relevant prompt for Stability AI
-        prompt = f"Create a satirical, bold news illustration for this headline: {short_text}. Style: bold colors, exaggerated features, humorous tone, journalistic caricature, highly detailed, digital art"
+        # Default to cartoon if style not found
+        style_config = style_templates.get(style, style_templates["cartoon"])
         
-        logger.info(f"Generated Stability AI prompt: {prompt[:100]}...")
+        # Construct prompt
+        prompt = f"{style_config['prefix']} {text_for_prompt} {style_config['suffix']}"
+        logger.info(f"Using Stability AI prompt: {prompt[:100]}...")
         
-        # API endpoint
-        api_host = "https://api.stability.ai"
-        engine_id = "stable-diffusion-xl-1024-v1-0"
-        
-        # Prepare the request
-        url = f"{api_host}/v1/generation/{engine_id}/text-to-image"
+        # API call
+        url = "https://api.stability.ai/v1/generation/stable-diffusion-xl-1024-v1-0/text-to-image"
         
         headers = {
-            "Content-Type": "application/json",
             "Accept": "application/json",
+            "Content-Type": "application/json",
             "Authorization": f"Bearer {api_key}"
         }
         
-        payload = {
-            "text_prompts": [{"text": prompt}],
-            "cfg_scale": 7,
-            "height": 1024,
+        body = {
             "width": 1024,
-            "samples": 1,
-            "steps": 30,
-            "style_preset": "comic-book"
+            "height": 1024,
+            "steps": style_config["steps"],
+            "cfg_scale": style_config["cfg_scale"],
+            "style_preset": style_config["style_preset"],
+            "text_prompts": [
+                {"text": prompt, "weight": 1.0},
+                {"text": "blurry, bad quality, extra limbs, deformed, photorealistic, realistic", "weight": -1.0}
+            ]
         }
         
-        # Create SSL context with proper certificates for macOS
-        ssl_context = None
-        if platform.system() == 'Darwin':  # macOS
-            logger.info("Using macOS SSL context with certifi for Stability AI API")
-            ssl_context = ssl.create_default_context(cafile=certifi.where())
+        # Enforce timeout to prevent hanging
+        timeout = aiohttp.ClientTimeout(total=60)
         
-        # Make the API request
-        logger.info("Sending request to Stability AI API...")
-        api_start_time = time.time()
-        connector = aiohttp.TCPConnector(ssl=ssl_context)
-        
-        async with aiohttp.ClientSession(connector=connector) as session:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            logger.info("Sending request to Stability AI API...")
             try:
-                async with session.post(url, headers=headers, json=payload, timeout=90) as resp:
-                    status = resp.status
-                    logger.info(f"Stability AI API response status: {status}")
-                    
-                    if status == 200:
-                        response_data = await resp.json()
-                        api_duration = time.time() - api_start_time
-                        logger.info(f"Stability AI API request completed in {api_duration:.2f} seconds")
+                async with session.post(url, headers=headers, json=body) as response:
+                    if response.status == 200:
+                        result = await response.json()
                         
-                        # Process the response
-                        if "artifacts" in response_data and len(response_data["artifacts"]) > 0:
-                            image_data_b64 = response_data["artifacts"][0]["base64"]
-                            image_data = base64.b64decode(image_data_b64)
+                        if "artifacts" in result and len(result["artifacts"]) > 0:
+                            # Extract image from the first artifact
+                            b64_image = result["artifacts"][0]["base64"]
+                            image_data = base64.b64decode(b64_image)
                             
-                            total_duration = time.time() - start_time
-                            logger.info(f"Total Stability AI image generation completed in {total_duration:.2f} seconds")
-                            return BytesIO(image_data)
+                            # Create BytesIO object
+                            image_stream = BytesIO(image_data)
+                            
+                            logger.info(f"Successfully generated image with Stability AI (size: {len(image_data)} bytes)")
+                            return image_stream
                         else:
-                            logger.error("No image artifacts found in Stability AI response")
-                            return None
+                            logger.error("No artifacts found in Stability AI response")
                     else:
-                        error_text = await resp.text()
-                        logger.error(f"Failed to generate image: HTTP {status}")
-                        logger.error(f"Response: {error_text}")
-                        return None
+                        error_text = await response.text()
+                        logger.error(f"Stability AI request failed with status {response.status}: {error_text}")
             except asyncio.TimeoutError:
-                logger.error("Timeout occurred while calling Stability AI API")
-                return None
-            except Exception as api_err:
-                logger.error(f"Stability AI API error: {str(api_err)}", exc_info=True)
-                return None
+                logger.error("Stability AI request timed out after 60 seconds")
+            except Exception as e:
+                logger.error(f"Error making Stability AI request: {str(e)}")
                 
+        return None
+        
     except Exception as e:
-        logger.error(f"Error in generate_image_with_stability_ai: {str(e)}", exc_info=True)
+        logger.error(f"Error in Stability AI image generation: {str(e)}")
         return None
 
 async def generate_image_for_post(client, text, max_length=100):
@@ -136,7 +140,7 @@ async def generate_image_for_post(client, text, max_length=100):
     
     if use_stability:
         logger.info("Using Stability AI for image generation")
-        return await generate_image_with_stability_ai(text, max_length)
+        return await generate_image_with_stability_ai(text)
     
     try:
         start_time = time.time()

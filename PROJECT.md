@@ -18,7 +18,11 @@
 - [x] Verified posts appearing correctly in destination channels
 - [x] Fixed test destination channel selection in test pipeline
 - [ ] Fix "database is locked" SQLite error on session file access
-- [ ] Further improve image generation prompts for better results
+- [ ] Improve image generation prompts for more consistent style:
+  - [ ] Create caricature/cartoon-style prompts for more humor
+  - [ ] Design prompts for meme-like or infographic style
+  - [ ] Ensure images have a consistent visual style
+  - [ ] Optimize Stability AI settings for more creative results
 
 ## Step-by-Step Deployment Path
 
