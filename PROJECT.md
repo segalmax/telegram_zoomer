@@ -13,6 +13,8 @@
 - [x] Added test channels for end-to-end testing
 - [x] AWS deployment instructions
 - [ ] Fix "database is locked" SQLite error on session file access
+- [ ] Add original NYT article links to translated posts
+- [ ] Improve image generation for more realistic caricatures/satirical style
 
 ## Step-by-Step Deployment Path
 
