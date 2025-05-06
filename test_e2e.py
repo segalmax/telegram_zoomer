@@ -75,8 +75,8 @@ async def main():
         try:
             os.remove(f"{SESSION}.session")
             logger.info(f"Removed temporary session file")
-        except:
-            pass
+        except (FileNotFoundError, PermissionError, OSError) as e:
+            logger.debug(f"Could not remove session file: {e}")
 
 if __name__ == "__main__":
     logger.info("Note: This test requires interactive authentication.")
