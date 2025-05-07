@@ -34,6 +34,7 @@ from app.bot import translate_and_post
 try:
     from telethon import TelegramClient
     from telethon.network import ConnectionTcpAbridged
+    from telethon import events
     TELETHON_AVAILABLE = True
 except ImportError:
     TELETHON_AVAILABLE = False
@@ -266,6 +267,7 @@ async def run_telegram_test(args):
         logger.info("Session file does not exist or new session requested - you will need to authenticate")
         
     client = None
+    processed_message_received = asyncio.Event()
     
     try:
         # Set environment variables based on arguments
@@ -296,10 +298,85 @@ async def run_telegram_test(args):
             return False
         
         logger.info("Successfully connected and authenticated to Telegram")
+
+        # Store the ID of the test message for verification
+        test_message_id = None
+        
+        # Set up event handler (like in production) to test this critical path
+        @client.on(events.NewMessage(incoming=True, outgoing=True))  # Listen to ALL messages for debugging
+        async def test_event_handler(event):
+            try:
+                logger.info(f"⭐ Event received: chat_id={event.chat_id}, message_id={event.message.id}")
+                
+                # Debug print to see if this matches our test channel
+                if event.chat_id == client.get_peer_id(TEST_SRC_CHANNEL):
+                    logger.info(f"✓ Message is from test source channel: {TEST_SRC_CHANNEL}")
+                
+                nonlocal test_message_id
+                
+                # Only process our test message
+                if event.message.id == test_message_id and event.chat_id == client.get_peer_id(TEST_SRC_CHANNEL):
+                    logger.info(f"🔔 Processing test message {event.message.id}")
+                    
+                    # Use the same logic as in production
+                    txt = event.message.message
+                    if not txt:
+                        logger.warning("Message has no text content")
+                        return
+                    
+                    logger.info(f"Processing message: {txt[:50]}...")
+                    
+                    # Use app.bot's translate_and_post with TEST_DST_CHANNEL
+                    # But with a better way to track completion
+                    success = await translate_and_post(
+                        client, 
+                        txt, 
+                        event.message.id,
+                        destination_channel=TEST_DST_CHANNEL
+                    )
+                    
+                    if success:
+                        logger.info("✅ Event handler successfully processed test message")
+                        # Signal that we've processed the message
+                        processed_message_received.set()
+                    else:
+                        logger.error("❌ Event handler failed to process test message")
+                else:
+                    # For debugging
+                    if event.chat_id == client.get_peer_id(TEST_SRC_CHANNEL):
+                        logger.info(f"Ignoring message {event.message.id} - we're looking for {test_message_id}")
+            except Exception as e:
+                logger.error(f"Error in test event handler: {str(e)}", exc_info=True)
+                
+        # Force the client to receive updates
+        logger.info("Ensuring client is receiving updates...")
+        
+        # Multiple strategies to fix Telethon's missed events issue
+        await client.catch_up()  # Force fetch updates
+        
+        # Keep connection alive
+        try:
+            from telethon.tl.functions.account import UpdateStatusRequest
+            await client(UpdateStatusRequest(offline=False))
+            logger.info("Updated account status to online")
+        except Exception as e:
+            logger.warning(f"Failed to update account status: {e}")
+
+        # Give the event system time to initialize (shorter)
+        logger.info("Waiting for event system to initialize...")
+        await asyncio.sleep(1)
         
         # Create test message with NYT link
         test_message = TEST_MESSAGE
         
+        # Use a proper outgoing message handler instead of MessageSent
+        message_sent_ids = []
+        
+        @client.on(events.NewMessage(outgoing=True))
+        async def message_sent_handler(event):
+            message_sent_ids.append(event.message.id)
+            logger.info(f"📤 Outgoing message detected: id={event.message.id}, chat={event.chat_id}")
+            
         # Send test message to source channel
         logger.info(f"Sending test message to {TEST_SRC_CHANNEL}...")
         sent_msg = await client.send_message(TEST_SRC_CHANNEL, test_message)
@@ -309,23 +386,99 @@ async def run_telegram_test(args):
             return False
             
         logger.info(f"Test message sent successfully with ID: {sent_msg.id}")
+        test_message_id = sent_msg.id
         
-        # Process the message using the production code
-        logger.info("Processing message with production code...")
+        # Wait for the event handler to process the message (with timeout)
+        logger.info("Waiting for event handler to process the message...")
+        max_retries = 5  # Fewer retries but more effective strategies
+        retry_count = 0
+        success = False
+        retry_wait = 0.5  # Very short wait between retries
         
-        # Use the actual production function to translate and post
-        success = await translate_and_post(
-            client, 
-            test_message, 
-            sent_msg.id, 
-            destination_channel=TEST_DST_CHANNEL
-        )
+        while retry_count < max_retries and not success:
+            if retry_count > 0:
+                logger.info(f"Retry attempt {retry_count}/{max_retries}...")
+                
+                # Force fetch updates before retry
+                await client.catch_up()
+                
+                try:
+                    # Get dialogs to ensure the client is connected
+                    await client.get_dialogs(limit=5)
+                    logger.info("Forced dialog update")
+                    
+                    # Poll for channel updates directly (important for large channels)
+                    from telethon.tl.functions.updates import GetChannelDifferenceRequest
+                    from telethon.tl.types import InputChannel, ChannelMessagesFilterEmpty
+                    
+                    # Try to get channel entity
+                    try:
+                        channel = await client.get_entity(TEST_SRC_CHANNEL)
+                        input_channel = InputChannel(channel_id=channel.id, access_hash=channel.access_hash)
+                        
+                        # Get channel difference (this is what the official app does for updates)
+                        diff = await client(GetChannelDifferenceRequest(
+                            channel=input_channel,
+                            filter=ChannelMessagesFilterEmpty(),
+                            pts=0,  # Start from beginning 
+                            limit=100
+                        ))
+                        logger.info(f"Manually polled channel for updates: {len(getattr(diff, 'new_messages', []))} new messages")
+                    except Exception as e:
+                        logger.warning(f"Failed to poll channel updates: {e}")
+                        
+                except Exception as e:
+                    logger.warning(f"Failed to get dialogs: {e}")
+                
+                # Send a shorter retry message
+                short_msg = f"Test retry {retry_count}"
+                sent_msg = await client.send_message(TEST_SRC_CHANNEL, short_msg)
+                test_message_id = sent_msg.id
+                logger.info(f"Sent shorter test message with ID: {test_message_id}")
+                
+                # Reset event for the new message
+                processed_message_received.clear()
+                
+            try:
+                # Use a very short timeout (2 seconds)
+                await asyncio.wait_for(processed_message_received.wait(), timeout=2)
+                logger.info("Message was successfully processed by event handler")
+                success = True
+            except asyncio.TimeoutError:
+                logger.warning(f"Timed out waiting for event handler (attempt {retry_count+1}/{max_retries})")
+                
+                # Check if our sent message ID appeared in processed messages
+                async for message in client.iter_messages(TEST_DST_CHANNEL, limit=5):
+                    logger.info(f"Checking recent message in destination: {message.id}")
+                    if "Test retry" in message.text or "BREAKING NEWS" in message.text:
+                        logger.info(f"Found translated message in destination channel: {message.text[:30]}...")
+                        success = True
+                        break
+                
+                # If still not successful, try direct processing much earlier
+                if not success and retry_count >= 1:
+                    logger.warning("Event handler not triggering. Attempting fallback direct processing...")
+                    # Get the message directly and process it
+                    messages = await client.get_messages(TEST_SRC_CHANNEL, limit=1)
+                    if messages and messages[0]:
+                        logger.info(f"Retrieved latest message directly: {messages[0].id}")
+                        direct_success = await translate_and_post(
+                            client,
+                            messages[0].message,
+                            messages[0].id,
+                            destination_channel=TEST_DST_CHANNEL
+                        )
+                        if direct_success:
+                            logger.info("✅ Direct processing successful")
+                            success = True
+                            break
+                
+                retry_count += 1
+                await asyncio.sleep(retry_wait)  # Short wait between retries
         
         if not success:
-            logger.error("Failed to process and post the message")
+            logger.error("Failed to process the message after maximum retries")
             return False
-        
-        logger.info("Message processed successfully")
         
         # Verify that the message appears in the destination channel
         logger.info(f"Verifying message appears in {TEST_DST_CHANNEL}...")

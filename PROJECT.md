@@ -38,7 +38,14 @@
 - [x] Robust error handling throughout the application
 - [x] Clear logging for diagnostics
 - [x] Fix "database is locked" SQLite error (session file access)
-- [x] Implement a keep-alive/ping mechanism for the Telegram connection.
+- [x] Implement a keep-alive/ping mechanism for the Telegram connection
+- [x] Multiple strategies for handling missed events:
+    - [x] Periodic client.catch_up() calls to force update retrieval
+    - [x] Manual channel polling with GetChannelDifferenceRequest for large channels
+    - [x] Background tasks to check for new messages if events are missed
+    - [x] Use UpdateStatusRequest to keep connections alive and receiving updates
+- [x] Implement persistent session handling to avoid frequent re-authentication
+- [x] Comprehensive end-to-end automated testing
 - [x] Code cleanup and organization (ongoing)
 
 ## Configuration

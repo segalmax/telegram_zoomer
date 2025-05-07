@@ -1,3 +1,8 @@
+#!/usr/bin/env python3
+"""
+Telegram Zoomer Bot - Translates posts into zoomer slang
+"""
+
 import os
 import asyncio
 import logging
@@ -12,6 +17,13 @@ import openai
 from dotenv import load_dotenv
 from .translator import get_openai_client, translate_text
 from .image_generator import generate_image_for_post
+from telethon.tl.functions.account import UpdateStatusRequest
+from telethon.tl.functions.updates import GetChannelDifferenceRequest
+from telethon.tl.types import InputChannel, ChannelMessagesFilterEmpty
+from telethon.errors import SessionPasswordNeededError
+from datetime import datetime, timedelta
+import random
+import argparse
 
 # Load environment variables explicitly from project root
 dotenv_path = Path(__file__).resolve().parent.parent / '.env'
@@ -20,12 +32,31 @@ if dotenv_path.exists():
 else:
     print(f"Warning: .env file not found at {dotenv_path}", file=sys.stderr)
 
+# Get configuration from environment variables
+API_ID = os.getenv('API_ID')
+API_HASH = os.getenv('API_HASH')
+PHONE = os.getenv('PHONE') or os.getenv('TG_PHONE')  # Check both variable names
+SESSION_PATH = os.getenv('SESSION_PATH', 'session/nyt_zoomer')
+SRC_CHANNEL = os.getenv('SRC_CHANNEL')
+DST_CHANNEL = os.getenv('DST_CHANNEL')
+TRANSLATION_STYLE = os.getenv('TRANSLATION_STYLE', 'both')  # left, right, both
+GENERATE_IMAGES = os.getenv('GENERATE_IMAGES', 'true').lower() == 'true'
+OPENAI_KEY = os.getenv('OPENAI_API_KEY')
+PROCESS_RECENT = os.getenv('PROCESS_RECENT', 0)
+CHECK_CHANNEL_INTERVAL = int(os.getenv('CHECK_CHANNEL_INTERVAL', '300'))  # Default to 5 minutes
+KEEP_ALIVE_INTERVAL = int(os.getenv('KEEP_ALIVE_INTERVAL', '60'))  # Keep connection alive every minute
+MANUAL_POLL_INTERVAL = int(os.getenv('MANUAL_POLL_INTERVAL', '180'))  # Manual polling every 3 minutes
+USE_STABILITY_AI = os.getenv('USE_STABILITY_AI', 'false').lower() == 'true'
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+    ]
 )
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('app.bot')
 
 # Configuration from environment variables
 try:
@@ -39,16 +70,10 @@ except (TypeError, ValueError) as e:
 TG_PHONE = os.getenv('TG_PHONE') # Optional, bot will prompt
 SESSION_DEFAULT = 'session/new_session' if (Path(__file__).resolve().parent.parent / 'session').is_dir() else 'new_session'
 SESSION = os.getenv('TG_SESSION', SESSION_DEFAULT)
-SRC_CHANNEL = os.getenv('SRC_CHANNEL')
-DST_CHANNEL = os.getenv('DST_CHANNEL')
 
 if not SRC_CHANNEL or not DST_CHANNEL:
     logger.error("Error: SRC_CHANNEL or DST_CHANNEL is not set in .env.")
     sys.exit("Source/Destination channel environment variables missing. Exiting.")
-
-TRANSLATION_STYLE = os.getenv('TRANSLATION_STYLE', 'both')
-GENERATE_IMAGES = os.getenv('GENERATE_IMAGES', 'true').lower() == 'true'
-USE_STABILITY_AI = os.getenv('USE_STABILITY_AI', 'false').lower() == 'true'
 
 # Initialize OpenAI client
 openai_client = None
@@ -85,8 +110,8 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
         elif not openai_client and GENERATE_IMAGES:
             logger.warning("Image generation is enabled, but OpenAI client is not initialized (missing API key?).")
 
-        # The LLM will now handle source attribution naturally based on the prompt
-        # No need for hardcoded source_footer
+        # Always include source attribution, even when URL is not available
+        source_footer = f"\n\n🔗 Оригинал: {extract_nytimes_link(txt)}" if extract_nytimes_link(txt) else "\n\n🔗 Оригинал: Unknown source"
         
         async def send_message_parts(channel, text_content, image_file=None, image_url_link=None):
             if image_file:
@@ -226,102 +251,198 @@ async def ping_server(client_instance):
             await asyncio.sleep(60) 
         await asyncio.sleep(300) # 5 minutes
 
-async def run_bot():
-    logger.info("Starting Telegram Zoomer bot")
-    logger.info(f"Python version: {sys.version}")
-    logger.info(f"Using session file: {SESSION}")
+async def extract_nytimes_link(text):
+    if not text: return None
     
-    client = None # Keep 'client' as the variable name within this function scope for Telethon client
+    # Let the LLM handle URL extraction for more flexibility
+    # The link will be included naturally in the translations based on our prompt
+    return None
+
+async def process_recent_messages(client, count):
+    """Process a specified number of recent messages from source channel"""
     try:
-        client = TelegramClient(
-            SESSION, API_ID, API_HASH,
-            connection=ConnectionTcpAbridged,
-            device_model="MacbookPro", system_version="macOS Ventura", app_version="ZoomerBot 1.0",
-            receive_updates=True, auto_reconnect=True, retry_delay=5, connection_retries=10
-        )
-        logger.info("Connecting to Telegram...")
-        try:
-            await asyncio.wait_for(client.connect(), timeout=30)
-        except asyncio.TimeoutError:
-            logger.error("Timed out connecting to Telegram.")
-            return
-        logger.info("Connected successfully.")
-
-        logger.info("Starting client and handling authentication if needed...")
-        try:
-            await client.start(phone=TG_PHONE) # TG_PHONE can be None, client.start handles it
-        except asyncio.TimeoutError:
-            logger.error("Timed out starting client (authentication step).")
-            if client.is_connected(): await client.disconnect()
-            return
-        except Exception as e: # Other errors during start (e.g. invalid phone, API hash)
-            logger.error(f"Error starting client: {str(e)}")
-            if client.is_connected(): await client.disconnect()
-            return
+        logger.info(f"Processing {count} recent messages from {SRC_CHANNEL}")
         
-        if not await client.is_user_authorized():
-            logger.error("Authentication failed. Please ensure credentials and code are correct.")
-            if client.is_connected(): await client.disconnect()
-            return
-        logger.info("Successfully authorized - ready to process messages.")
+        # Get the most recent messages from source channel
+        messages = await client.get_messages(SRC_CHANNEL, limit=count)
+        
+        # Process each message, starting from oldest (reverse order)
+        for msg in reversed(messages):
+            if not msg.text:
+                continue
                 
-        import argparse
-        parser = argparse.ArgumentParser(description='Telegram NYT-to-Zoomer Bot')
-        parser.add_argument('--process-recent', type=int, help='Process N most recent posts')
-        args = parser.parse_args()
-        
-        if args.process_recent:
-            logger.info(f"Batch mode: processing {args.process_recent} recent posts.")
-            try:
-                await process_recent_posts(client, limit=args.process_recent)
-            except Exception as e:
-                logger.error(f"Error in batch processing call: {str(e)}", exc_info=True)
-            finally:
-                logger.info("Batch processing finished or errored. Disconnecting.")
-                if client.is_connected(): await client.disconnect()
-                return # Exit after batch processing
-        
-        logger.info(f"Continuous mode: Listening for new posts from {SRC_CHANNEL}")
-        logger.info(f"Translation style: {TRANSLATION_STYLE}, Generate images: {GENERATE_IMAGES}")
-        await setup_event_handlers(client)
-        
-        ping_task = asyncio.create_task(ping_server(client))
-        
-        logger.info("Starting main event loop (run_until_disconnected)")
-        await client.run_until_disconnected()
-
+            logger.info(f"Processing message ID: {msg.id}")
+            await translate_and_post(client, msg.text, msg.id)
+            
+            # Add a short delay between processing messages
+            await asyncio.sleep(1)
+            
+        logger.info(f"Completed processing {count} recent messages")
+        return True
     except Exception as e:
-        logger.error(f"Fatal error in run_bot: {str(e)}", exc_info=True)
-    finally:
-        logger.info("Bot stopping...")
-        if client and client.is_connected():
-            try:
-                await client.disconnect()
-                logger.info("Client disconnected.")
-            except Exception as e:
-                logger.error(f"Error disconnecting client: {str(e)}")
-        if 'ping_task' in locals() and not ping_task.done():
-            ping_task.cancel()
-            try: await ping_task
-            except asyncio.CancelledError: logger.info("Ping task cancelled.")
-        logger.info("Bot stopped.")
+        logger.exception(f"Error processing recent messages: {e}")
+        return False
+
+async def background_keep_alive(client):
+    """Background task to keep the connection alive and ensure updates are received"""
+    logger.info("Starting background keep-alive task")
+    while True:
+        try:
+            # Update online status to ensure Telegram knows we're active
+            await client(UpdateStatusRequest(offline=False))
+            logger.info("Updated online status")
+            
+            # Sleep until next interval
+            await asyncio.sleep(KEEP_ALIVE_INTERVAL)
+        except Exception as e:
+            logger.error(f"Error in keep-alive task: {e}")
+            await asyncio.sleep(30)  # Shorter sleep on error
+
+async def background_update_checker(client):
+    """Background task to manually check for updates in case event handlers miss them"""
+    logger.info("Starting background update checker task")
+    last_check_time = datetime.now()
+    
+    while True:
+        try:
+            # Force catch up to get any missed updates
+            await client.catch_up()
+            
+            # Calculate time since last check
+            now = datetime.now()
+            time_since_check = (now - last_check_time).total_seconds()
+            
+            if time_since_check >= CHECK_CHANNEL_INTERVAL:
+                logger.info(f"Checking for any missed messages (last check was {time_since_check:.1f} seconds ago)")
+                
+                # Get recent messages from source channel
+                messages = await client.get_messages(SRC_CHANNEL, limit=5)
+                
+                # Find messages within the last check interval
+                for msg in messages:
+                    if not msg.text:
+                        continue
+                        
+                    msg_time = msg.date.replace(tzinfo=None)  # Remove timezone for comparison
+                    
+                    # Check if this message is new since our last check
+                    if (now - msg_time) < timedelta(seconds=CHECK_CHANNEL_INTERVAL * 1.1):
+                        logger.info(f"Found possibly missed message ID: {msg.id} from {msg_time}")
+                        
+                        # Check if message was already processed by checking recent posts in destination
+                        dst_messages = await client.get_messages(DST_CHANNEL, limit=10)
+                        already_processed = False
+                        
+                        # Simple content-based check (could be improved)
+                        for dst_msg in dst_messages:
+                            if dst_msg.text and msg.text[:50] in dst_msg.text:
+                                already_processed = True
+                                break
+                                
+                        if not already_processed:
+                            logger.info(f"Processing potentially missed message ID: {msg.id}")
+                            await translate_and_post(client, msg.text, msg.id)
+                
+                # Update last check time
+                last_check_time = now
+            
+            # Sleep until next manual poll cycle
+            await asyncio.sleep(MANUAL_POLL_INTERVAL)
+        except Exception as e:
+            logger.error(f"Error in update checker task: {e}")
+            await asyncio.sleep(60)  # Sleep on error
+
+async def background_channel_poller(client):
+    """Background task to manually poll for channel updates using GetChannelDifferenceRequest"""
+    logger.info("Starting background channel polling task")
+    
+    while True:
+        try:
+            # Get channel entity
+            channel = await client.get_entity(SRC_CHANNEL)
+            
+            # Create input channel
+            input_channel = InputChannel(channel_id=channel.id, access_hash=channel.access_hash)
+            
+            # Get channel difference (manual poll for updates)
+            diff = await client(GetChannelDifferenceRequest(
+                channel=input_channel,
+                filter=ChannelMessagesFilterEmpty(),
+                pts=0,  # Start from beginning (this should be stored and incremented)
+                limit=100
+            ))
+            
+            logger.info(f"Channel polling: received {len(getattr(diff, 'new_messages', []))} new messages")
+            
+            # Process any new messages found
+            for new_msg in getattr(diff, 'new_messages', []):
+                if hasattr(new_msg, 'message') and new_msg.message:
+                    logger.info(f"Processing newly discovered message from poll: {new_msg.id}")
+                    await translate_and_post(client, new_msg.message, new_msg.id)
+            
+            # Sleep between polls
+            await asyncio.sleep(MANUAL_POLL_INTERVAL)
+        except Exception as e:
+            logger.error(f"Error in channel polling task: {e}")
+            await asyncio.sleep(60)
+
+async def main():
+    """Main function to run the bot"""
+    # Check if required environment variables are set
+    if not all([API_ID, API_HASH, PHONE, SRC_CHANNEL, DST_CHANNEL]):
+        logger.error("Missing required environment variables")
+        for var in ['API_ID', 'API_HASH', 'PHONE', 'SRC_CHANNEL', 'DST_CHANNEL']:
+            if not globals()[var]:
+                logger.error(f"Missing {var}")
+        return False
+    
+    # Create directories if they don't exist
+    session_dir = Path(SESSION_PATH).parent
+    session_dir.mkdir(exist_ok=True)
+    
+    # Create the client
+    client = TelegramClient(SESSION_PATH, API_ID, API_HASH)
+    
+    # Start the client
+    await client.start(phone=PHONE)
+    logger.info("Client started successfully")
+    
+    # Check if user is authorized
+    if not await client.is_user_authorized():
+        logger.error("User is not authorized. Please check your session file or authentication.")
+        return False
+    
+    # Handle the --process-recent argument
+    parser = argparse.ArgumentParser(description='Telegram Zoomer Bot')
+    parser.add_argument('--process-recent', type=int, help='Process N recent messages from the source channel')
+    args = parser.parse_args()
+    
+    if args.process_recent:
+        await process_recent_messages(client, args.process_recent)
+        await client.disconnect()
+        return True
+    
+    # Register event handler for new messages
+    @client.on(events.NewMessage(chats=SRC_CHANNEL))
+    async def handler(event):
+        logger.info(f"New message event received from {SRC_CHANNEL}, ID: {event.message.id}")
+        await translate_and_post(client, event.message.text, event.message.id)
+    
+    # Start background tasks for robust operation
+    asyncio.create_task(background_keep_alive(client))
+    asyncio.create_task(background_update_checker(client))
+    asyncio.create_task(background_channel_poller(client))
+    
+    logger.info(f"Bot is now running, listening to {SRC_CHANNEL}")
+    logger.info(f"Translation style: {TRANSLATION_STYLE}")
+    logger.info(f"Image generation: {'Enabled' if GENERATE_IMAGES else 'Disabled'}")
+    
+    # Force initial catch up to ensure we're getting updates
+    await client.catch_up()
+    
+    # Keep the connection running
+    await client.run_until_disconnected()
+    return True
 
 if __name__ == "__main__":
-    # Ensure logs directory exists
-    log_dir = Path(__file__).resolve().parent.parent / 'logs'
-    log_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Ensure session directory exists if specified in SESSION path
-    session_path_str = SESSION
-    if '/' in session_path_str or '\\' in session_path_str:
-        session_dir = Path(session_path_str).parent
-        session_dir.mkdir(parents=True, exist_ok=True)
-
-    try:
-        asyncio.run(run_bot())
-    except KeyboardInterrupt:
-        logger.info("Bot interrupted by user (KeyboardInterrupt).")
-    except Exception as e: # Catch-all for errors during asyncio.run() or if run_bot itself fails spectacularly
-        logger.critical(f"Unhandled exception at top level: {str(e)}", exc_info=True)
-    finally:
-        logging.shutdown() # Ensure all logs are flushed 
+    asyncio.run(main()) 
