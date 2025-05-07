@@ -251,7 +251,7 @@ async def ping_server(client_instance):
             await asyncio.sleep(60) 
         await asyncio.sleep(300) # 5 minutes
 
-async def extract_nytimes_link(text):
+def extract_nytimes_link(text):
     if not text: return None
     
     # Let the LLM handle URL extraction for more flexibility
