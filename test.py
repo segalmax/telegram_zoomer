@@ -2,18 +2,17 @@
 """
 Unified test script for Telegram Zoomer Bot
 
-This script provides testing for:
-1. API Integration - Tests OpenAI and Stability AI without Telegram
+This script provides complete end-to-end testing:
+1. API Integration - Tests OpenAI and Stability AI
 2. Telegram Pipeline - Tests the full message flow through Telegram
 
 Usage:
-  python test.py api                # Run only API integration tests
-  python test.py telegram           # Run only Telegram pipeline tests
-  python test.py all                # Run all tests
+  python test.py                   # Run the full end-to-end test
   
 Options:
-  --stability                       # Test with Stability AI
+  --stability                       # Test with Stability AI image generation
   --no-images                       # Disable image generation
+  --new-session                     # Force creation of a new session (requires re-authentication)
 """
 
 import os
@@ -26,9 +25,10 @@ import time
 from io import BytesIO
 from dotenv import load_dotenv
 import openai
-from translator import get_openai_client, translate_text
-from image_generator import generate_image_for_post, generate_image_with_stability_ai
-from bot import translate_and_post, extract_nytimes_link
+from pathlib import Path
+from app.translator import get_openai_client, translate_text
+from app.image_generator import generate_image_for_post, generate_image_with_stability_ai
+from app.bot import translate_and_post
 
 # Try to import Telegram if needed
 try:
@@ -63,6 +63,9 @@ API_HASH = os.getenv('TG_API_HASH')
 TG_PHONE = os.getenv('TG_PHONE')
 TEST_SRC_CHANNEL = os.getenv('TEST_SRC_CHANNEL')
 TEST_DST_CHANNEL = os.getenv('TEST_DST_CHANNEL')
+
+# Persistent test session file
+PERSISTENT_TEST_SESSION = "session/test_session_persistent"
 
 #
 # API Integration Tests
@@ -244,8 +247,24 @@ async def run_telegram_test(args):
         logger.error("Missing Telegram credentials or test channels. Check your .env file")
         return False
     
-    # Create a unique session file to avoid DB lock issues
-    TEST_SESSION = f"test_session_{uuid.uuid4().hex[:8]}"
+    # Create session directory if it doesn't exist
+    session_dir = Path("session")
+    session_dir.mkdir(exist_ok=True)
+    
+    # Use persistent session file or create a new one if requested
+    test_session = PERSISTENT_TEST_SESSION
+    if args.new_session:
+        test_session = f"session/test_session_{uuid.uuid4().hex[:8]}"
+        logger.info(f"Creating new temporary test session: {test_session}")
+    else:
+        logger.info(f"Using persistent test session: {test_session}")
+        
+    session_file_exists = Path(f"{test_session}.session").exists()
+    if session_file_exists and not args.new_session:
+        logger.info("Session file already exists - will reuse existing authentication")
+    else:
+        logger.info("Session file does not exist or new session requested - you will need to authenticate")
+        
     client = None
     
     try:
@@ -257,12 +276,9 @@ async def run_telegram_test(args):
             os.environ['GENERATE_IMAGES'] = 'false'
             logger.info("Image generation disabled for this test")
         
-        logger.info(f"Creating new test session: {TEST_SESSION}")
-        logger.info("This requires phone verification. You will need to enter the code sent to your phone.")
-        
-        # Create client with a unique test session
+        # Create client with the session
         client = TelegramClient(
-            TEST_SESSION, 
+            test_session, 
             int(API_ID), 
             API_HASH,
             connection=ConnectionTcpAbridged,
@@ -297,19 +313,11 @@ async def run_telegram_test(args):
         # Process the message using the production code
         logger.info("Processing message with production code...")
         
-        # Extract NYTimes link from the message
-        original_url = extract_nytimes_link(test_message)
-        if original_url:
-            logger.info(f"Extracted NYTimes URL: {original_url}")
-        else:
-            logger.warning("No NYTimes URL found in the test message")
-        
         # Use the actual production function to translate and post
         success = await translate_and_post(
             client, 
             test_message, 
             sent_msg.id, 
-            original_url,
             destination_channel=TEST_DST_CHANNEL
         )
         
@@ -348,11 +356,12 @@ async def run_telegram_test(args):
         
         # Check for NYT link in the posted message
         logger.info("Verifying source attribution appears in posted message...")
-        # Instead of checking for the specific URL, check for the source attribution text
-        source_verified = await verify_message_in_channel(client, TEST_DST_CHANNEL, "Оригинал:", timeout=30, limit=15)
+        
+        # Check for the source attribution text
+        source_verified = await verify_message_in_channel(client, TEST_DST_CHANNEL, "Оригинал:", timeout=60, limit=15)
         if not source_verified:
-            logger.warning("Could not verify source attribution in messages. This might be due to API limitations.")
-            # Don't fail the test for this, it's likely a limitation of how we're viewing messages
+            logger.error("Failed to verify source attribution in posted messages")
+            return False
         else:
             logger.info("Source attribution verified in posted message")
         
@@ -384,52 +393,50 @@ async def run_telegram_test(args):
             await client.disconnect()
             logger.info("Disconnected from Telegram")
             
-        # Clean up the temporary session file
-        try:
-            session_file = f"{TEST_SESSION}.session"
-            if os.path.exists(session_file):
-                os.remove(session_file)
-                logger.info(f"Removed temporary session file: {session_file}")
-        except Exception as e:
-            logger.warning(f"Failed to remove temporary session file: {str(e)}")
+        # Only clean up the temporary session file if it's not the persistent one
+        if args.new_session and test_session != PERSISTENT_TEST_SESSION:
+            try:
+                session_file = f"{test_session}.session"
+                if os.path.exists(session_file):
+                    os.remove(session_file)
+                    logger.info(f"Removed temporary session file: {session_file}")
+                    
+                # Also check for session-journal files
+                journal_file = f"{test_session}.session-journal"
+                if os.path.exists(journal_file):
+                    os.remove(journal_file)
+                    logger.info(f"Removed temporary journal file: {journal_file}")
+            except Exception as e:
+                logger.warning(f"Failed to remove temporary session file: {str(e)}")
+        else:
+            logger.info(f"Keeping persistent session file for future test runs")
 
 async def main():
     """Main function for running tests"""
     # Parse command line arguments
-    parser = argparse.ArgumentParser(description='Unified test script for Telegram Zoomer Bot')
+    parser = argparse.ArgumentParser(description='Full End-to-End Test for Telegram Zoomer Bot')
     
-    # Test mode subparsers
-    subparsers = parser.add_subparsers(dest='mode', help='Test mode', required=True)
-    api_parser = subparsers.add_parser('api', help='Run API integration tests')
-    telegram_parser = subparsers.add_parser('telegram', help='Run Telegram pipeline tests')
-    all_parser = subparsers.add_parser('all', help='Run all tests')
-    
-    # Common options for all test modes
-    for p in [api_parser, telegram_parser, all_parser]:
-        p.add_argument('--stability', action='store_true', help='Test with Stability AI image generation')
-        p.add_argument('--no-images', action='store_true', help='Disable image generation for testing')
+    # Optional arguments
+    parser.add_argument('--stability', action='store_true', help='Test with Stability AI image generation')
+    parser.add_argument('--no-images', action='store_true', help='Disable image generation for testing')
+    parser.add_argument('--new-session', action='store_true', help='Force creation of a new session (requires re-authentication)')
     
     args = parser.parse_args()
     
     success = True
     
-    # Run API integration tests
-    if args.mode in ['api', 'all']:
-        logger.info("=== Running API Integration Tests ===")
-        api_success = await run_api_tests(args)
-        if not api_success:
-            success = False
-            if args.mode == 'all':
-                logger.error("API tests failed, skipping Telegram tests")
-                return success
+    # Run API Integration Tests
+    logger.info("=== Running API Integration Tests ===")
+    api_success = await run_api_tests(args)
+    if not api_success:
+        logger.error("❌ API tests failed - stopping end-to-end test")
+        return False
     
-    # Run Telegram pipeline tests
-    if args.mode in ['telegram', 'all'] and (args.mode == 'telegram' or success):
-        logger.info("=== Running Telegram Pipeline Tests ===")
-        if args.mode == 'telegram' or input("Continue with Telegram tests? (y/n) ").lower() == 'y':
-            telegram_success = await run_telegram_test(args)
-            if not telegram_success:
-                success = False
+    # Run Telegram Pipeline Tests
+    logger.info("=== Running Telegram Pipeline Tests ===")
+    telegram_success = await run_telegram_test(args)
+    if not telegram_success:
+        success = False
     
     return success
 
@@ -437,10 +444,10 @@ if __name__ == "__main__":
     try:
         success = asyncio.run(main())
         if success:
-            logger.info("🎉 All tests passed!")
+            logger.info("🎉 All end-to-end tests passed!")
             sys.exit(0)
         else:
-            logger.error("❌ One or more tests failed")
+            logger.error("❌ End-to-end test failed")
             sys.exit(1)
     except KeyboardInterrupt:
         logger.info("Test interrupted by user")

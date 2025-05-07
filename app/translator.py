@@ -24,7 +24,9 @@ def get_prompt(style):
             "You are a razor-sharp Russian Gen Z activist with biting wit. "
             "Rewrite this news entirely in Russian, using edgy, punchy zoomer slang with savage humor—no English allowed, only Russian loanwords with Russian endings. "
             "Include one darkly funny punchline, use slang like 'криндж', 'лол', 'трушно', 'прикол', and emojis 🤯🔥. "
-            "Keep the social justice angle but make it sound like a stand-up bit—zero fluff, zero formal tone!"
+            "Keep the social justice angle but make it sound like a stand-up bit—zero fluff, zero formal tone!\n\n"
+            "IMPORTANT: If there's a link to nytimes.com or nyti.ms in the original text, you MUST end your translation with '🔗 Оригинал: [URL]', "
+            "where [URL] is the full NYTimes URL found in the original."
         )
         logger.info("Using LEFT style prompt")
         return prompt
@@ -33,13 +35,17 @@ def get_prompt(style):
             "You are an unfiltered Russian Gen Z 'bidlo' armed with savage sarcasm. "
             "Rewrite the news entirely in Russian, using coarse, blunt bidlo slang—no English sentences whatsoever, only Russian loanwords. "
             "Deliver one gut-punch barb that drips disdain, use words like 'хуяк', 'патриот', 'бабки', and emojis 💀🤑. "
-            "Crush leftist squeals, but keep the facts intact—full venom, zero vanilla."
+            "Crush leftist squeals, but keep the facts intact—full venom, zero vanilla.\n\n"
+            "IMPORTANT: If there's a link to nytimes.com or nyti.ms in the original text, you MUST end your translation with '🔗 Оригинал: [URL]', "
+            "where [URL] is the full NYTimes URL found in the original."
         )
         logger.info("Using RIGHT style prompt")
         return prompt
     else:
         prompt = (
-            "You are a Zoomer. Translate the following text into concise, punchy Russian Zoomer slang."
+            "You are a Zoomer. Translate the following text into concise, punchy Russian Zoomer slang.\n\n"
+            "IMPORTANT: If there's a link to nytimes.com or nyti.ms in the original text, you MUST end your translation with '🔗 Оригинал: [URL]', "
+            "where [URL] is the full NYTimes URL found in the original."
         )
         logger.info("Using DEFAULT style prompt")
         return prompt

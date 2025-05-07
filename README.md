@@ -7,7 +7,6 @@ A bot that monitors a Telegram channel (NYT), translates messages to Russian Zoo
 - Automatic message monitoring from source channel
 - OpenAI GPT-4o mini translation to Russian Zoomer slang
 - Robust error handling with retries
-- Containerized deployment with Docker
 - Persistent session storage
 - Comprehensive logging
 
@@ -15,80 +14,81 @@ A bot that monitors a Telegram channel (NYT), translates messages to Russian Zoo
 
 ### Prerequisites
 
+- Python 3.8+
 - Telegram API credentials (API ID and Hash) from [my.telegram.org](https://my.telegram.org/)
 - OpenAI API key from [OpenAI dashboard](https://platform.openai.com/account/api-keys)
-- Docker and Docker Compose (recommended)
 
 ### Configuration
 
-1. Copy the sample environment file:
-   ```
-   cp env.sample .env
-   ```
+1.  Create a `.env` file in the project root.
+    ```
+    # Example .env content:
+    TG_API_ID=your_telegram_api_id
+    TG_API_HASH=your_telegram_api_hash
+    OPENAI_API_KEY=your_openai_api_key
+    # TG_PHONE=your_phone_number_for_initial_auth # Optional, bot will prompt if needed
+    SRC_CHANNEL=source_channel_username_or_id
+    DST_CHANNEL=destination_channel_username_or_id
+    
+    # Recommended for cleaner project root:
+    TG_SESSION=session/new_session 
+    
+    # Optional overrides:
+    # TRANSLATION_STYLE=both # 'left', 'right', or 'both' (default)
+    # GENERATE_IMAGES=true # 'true' or 'false' (default)
+    # USE_STABILITY_AI=false # 'true' or 'false' (default)
+    # STABILITY_AI_API_KEY=your_stability_ai_key # Required if USE_STABILITY_AI is true
+    ```
 
-2. Edit `.env` with your credentials:
-   ```
-   TG_API_ID=your_telegram_api_id
-   TG_API_HASH=your_telegram_api_hash
-   OPENAI_API_KEY=your_openai_api_key
-   SRC_CHANNEL=source_channel_username_or_id
-   DST_CHANNEL=destination_channel_username_or_id
-   TG_SESSION=nyt_to_zoom
-   ```
+2.  Fill in your actual credentials and desired channel names in the `.env` file.
+    Ensure the `session/` directory exists if you set `TG_SESSION=session/new_session`.
 
-### Running with Docker (recommended)
+    **Important Environment Variables:**
+    *   `TG_API_ID`, `TG_API_HASH`: Your Telegram application credentials.
+    *   `OPENAI_API_KEY`: Your OpenAI API key.
+    *   `SRC_CHANNEL`: The username or ID of the Telegram channel to monitor.
+    *   `DST_CHANNEL`: The username or ID of the Telegram channel to post translations to.
+    *   `TG_PHONE`: (Optional, for first auth) Your phone number (e.g., +1234567890). Bot will prompt if needed.
+    *   `TG_SESSION`: (Optional) Session file path. Defaults to `new_session.session` in the root. Recommended: `session/new_session` (ensure `session/` directory exists).
+    *   `TRANSLATION_STYLE`, `GENERATE_IMAGES`, `USE_STABILITY_AI`, `STABILITY_AI_API_KEY`: See comments in example `.env`.
 
-```bash
-# Build and start the container
-docker-compose up -d
+### Running the Bot
 
-# View logs
-docker-compose logs -f
+1.  **Install requirements:**
+    ```bash
+    pip install -r requirements.txt
+    ```
 
-# Stop the container
-docker-compose down
-```
+2.  **(Recommended for first run if using `session/` for session file):** Create the session directory:
+    ```bash
+    mkdir -p session
+    ```
 
-### Running without Docker
-
-```bash
-# Install requirements
-pip install -r requirements.txt
-
-# Run the bot
-python bot.py
-```
+3.  **Run the bot:**
+    ```bash
+    python -m app.bot
+    ```
+    To process N recent posts instead of listening for new ones:
+    ```bash
+    python -m app.bot --process-recent N
+    ```
 
 ## First-time Authentication
 
-On first run, the bot will prompt for phone number and verification code in terminal to authenticate with Telegram. After authentication, the session is saved for future runs.
+On the first run, or if the session file is deleted/invalid, the bot will prompt for your phone number (if not in `.env` or if Telethon requires it) and then the verification code sent to your Telegram account. This happens directly in the terminal.
 
-For headless servers, start the bot locally first to create the session file, then copy it to the server.
+After successful authentication, the session file (e.g., `session/new_session.session` if configured, or `new_session.session` in the root) will be created. This file stores your session, so you won't need to log in every time.
 
-## Authentication
-
-This bot uses Telethon to authenticate with Telegram. The authentication process has been simplified for reliability:
-
-1. Ensure you have the correct API credentials in your .env file
-2. Run the bot with `python bot.py`
-3. You'll be prompted for the authentication code sent to your Telegram account
-4. After successful authentication, the session will be saved for future use
-
-If you need to authenticate separately before running the main bot, you can use:
-```bash
-python scripts/complete_auth.py
-```
-
-If authentication fails or times out, check the troubleshooting section in PROJECT.md.
+If you configured `TG_SESSION=session/new_session`, ensure you move your existing `new_session.session` (if any from previous root runs) into the `session/` directory *before* running the bot, or allow it to create a new one there after authentication.
 
 ## Maintenance
 
-- Logs are stored in `logs/` directory
-- Session files are stored in `session/` directory
-- To update the bot, pull the latest code and restart the container:
-  ```
+- Logs are stored in the `logs/` directory (ensure this directory exists or is created by the bot, e.g., via `mkdir -p logs`).
+- The session file is stored as per `TG_SESSION` (recommended: `session/new_session.session`).
+- To update the bot, pull the latest code from your repository:
+  ```bash
   git pull
-  docker-compose up -d --build
+  # then re-run the bot
   ```
 
 ## License
