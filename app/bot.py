@@ -286,11 +286,19 @@ async def process_recent_messages(client, count):
 async def background_keep_alive(client):
     """Background task to keep the connection alive and ensure updates are received"""
     logger.info("Starting background keep-alive task")
+    count = 0
+    
     while True:
         try:
             # Update online status to ensure Telegram knows we're active
             await client(UpdateStatusRequest(offline=False))
-            logger.info("Updated online status")
+            
+            # Log less frequently to reduce noise, only every 5 times
+            count += 1
+            if count % 5 == 1:
+                logger.info("Connection keep-alive: online status updated")
+            else:
+                logger.debug("Connection keep-alive ping sent")
             
             # Sleep until next interval
             await asyncio.sleep(KEEP_ALIVE_INTERVAL)
@@ -306,7 +314,11 @@ async def background_update_checker(client):
     while True:
         try:
             # Force catch up to get any missed updates
-            await client.catch_up()
+            try:
+                await client.catch_up()
+                logger.debug("Force update catch-up completed")
+            except Exception as e:
+                logger.debug(f"Force update catch-up note: {e}")
             
             # Calculate time since last check
             now = datetime.now()
@@ -345,16 +357,18 @@ async def background_update_checker(client):
                 
                 # Update last check time
                 last_check_time = now
+                logger.info("Missed message check completed")
             
             # Sleep until next manual poll cycle
             await asyncio.sleep(MANUAL_POLL_INTERVAL)
         except Exception as e:
-            logger.error(f"Error in update checker task: {e}")
-            await asyncio.sleep(60)  # Sleep on error
+            logger.error(f"Error in update checker: {e}")
+            await asyncio.sleep(60)  # Sleep on error before retry
 
 async def background_channel_poller(client):
     """Background task to manually poll for channel updates using GetChannelDifferenceRequest"""
     logger.info("Starting background channel polling task")
+    first_run = True
     
     while True:
         try:
@@ -365,26 +379,43 @@ async def background_channel_poller(client):
             input_channel = InputChannel(channel_id=channel.id, access_hash=channel.access_hash)
             
             # Get channel difference (manual poll for updates)
-            diff = await client(GetChannelDifferenceRequest(
-                channel=input_channel,
-                filter=ChannelMessagesFilterEmpty(),
-                pts=0,  # Start from beginning (this should be stored and incremented)
-                limit=100
-            ))
-            
-            logger.info(f"Channel polling: received {len(getattr(diff, 'new_messages', []))} new messages")
-            
-            # Process any new messages found
-            for new_msg in getattr(diff, 'new_messages', []):
-                if hasattr(new_msg, 'message') and new_msg.message:
-                    logger.info(f"Processing newly discovered message from poll: {new_msg.id}")
-                    await translate_and_post(client, new_msg.message, new_msg.id)
+            try:
+                diff = await client(GetChannelDifferenceRequest(
+                    channel=input_channel,
+                    filter=ChannelMessagesFilterEmpty(),
+                    pts=0,  # Start from beginning (this should be stored and incremented)
+                    limit=100
+                ))
+                
+                logger.info(f"Channel polling: received {len(getattr(diff, 'new_messages', []))} new messages")
+                
+                # Process any new messages found
+                for new_msg in getattr(diff, 'new_messages', []):
+                    if hasattr(new_msg, 'message') and new_msg.message:
+                        logger.info(f"Processing newly discovered message from poll: {new_msg.id}")
+                        await translate_and_post(client, new_msg.message, new_msg.id)
+                        
+                first_run = False  # Successfully completed a poll
+                
+            except Exception as e:
+                # Handle the specific "Persistent timestamp empty" error differently
+                if "Persistent timestamp empty" in str(e):
+                    if first_run:
+                        # It's normal on first run, so just log as info
+                        logger.info("First-time channel polling initialization (this is normal)")
+                        first_run = False
+                    else:
+                        # On subsequent runs, downgrade to debug level
+                        logger.debug("Channel polling initialization step")
+                else:
+                    # This is an actual error we want to see
+                    logger.error(f"Error in channel polling: {e}")
             
             # Sleep between polls
             await asyncio.sleep(MANUAL_POLL_INTERVAL)
         except Exception as e:
-            logger.error(f"Error in channel polling task: {e}")
-            await asyncio.sleep(60)
+            logger.error(f"Error setting up channel polling: {e}")
+            await asyncio.sleep(60)  # Sleep on error
 
 async def main():
     """Main function to run the bot"""
