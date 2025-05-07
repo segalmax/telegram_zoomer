@@ -297,6 +297,8 @@ async def background_keep_alive(client):
             count += 1
             if count % 5 == 1:
                 logger.info("Connection keep-alive: online status updated")
+                # Add a test entry to show we're actively running
+                logger.info(f"Bot active and monitoring channel: {SRC_CHANNEL} → {DST_CHANNEL}")
             else:
                 logger.debug("Connection keep-alive ping sent")
             
