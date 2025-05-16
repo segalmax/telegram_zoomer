@@ -446,3 +446,15 @@ FUNCTION process_recent_messages(client, count):
 - Add telemetry and monitoring
 - Implement rate limiting to prevent API throttling
 - Add support for message editing and deletion 
+
+## Reliability Features
+
+| Feature                 | Purpose                                   | Implementation                                |
+|-------------------------|-------------------------------------------|--------------------------------------------|
+| Session Persistence     | Maintain authentication across restarts    | Store session in environment variables      |
+| Channel Polling         | Backup mechanism if events are missed      | Regularly poll source channel with GetChannelDifferenceRequest |
+| Update Checker          | Periodically check for recent messages     | Compare recent messages to processed ones   |
+| Keep-Alive Mechanism    | Keep connection active and prevent timeouts| Regular status updates to telegram servers |
+| Auto-Reconnection       | Handle temporary connection losses         | Detect and reestablish dropped connections  |
+| Message State Persistence | Track last processed message across restarts | Store message ID and timestamp in environment variables |
+| Recovery Upon Restart   | Process messages missed during downtime    | Check for messages newer than last processed ID at startup |

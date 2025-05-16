@@ -18,6 +18,29 @@ A bot that monitors a Telegram channel (NYT), translates messages to Russian Zoo
 - Telegram API credentials (API ID and Hash) from [my.telegram.org](https://my.telegram.org/)
 - OpenAI API key from [OpenAI dashboard](https://platform.openai.com/account/api-keys)
 
+## Configuration
+
+The bot is configured through environment variables set in a `.env` file or via Heroku config variables:
+
+| Variable              | Description                                 | Required | Default Value |
+|-----------------------|---------------------------------------------|----------|---------------|
+| TG_API_ID             | Telegram API ID                             | Yes      | -             |
+| TG_API_HASH           | Telegram API Hash                           | Yes      | -             |
+| TG_PHONE              | Phone number for Telegram authentication    | Yes      | -             |
+| OPENAI_API_KEY        | OpenAI API key                              | Yes      | -             |
+| SRC_CHANNEL           | Source channel to monitor                   | Yes      | -             |
+| DST_CHANNEL           | Destination channel to post translations    | Yes      | -             |
+| TG_SESSION            | Path to session file (without .session ext) | No       | session/nyt_zoomer |
+| GENERATE_IMAGES       | Whether to generate images for posts        | No       | true          |
+| TRANSLATION_STYLE     | Translation style (only 'right' supported)  | No       | right         |
+| CHECK_CHANNEL_INTERVAL| Interval for checking missed messages (sec) | No       | 300           |
+| KEEP_ALIVE_INTERVAL   | Interval for keep-alive signals (sec)       | No       | 60            |
+| MANUAL_POLL_INTERVAL  | Interval for manual polling (sec)           | No       | 180           |
+| SESSION_DATA          | Base64 encoded session data (Heroku)        | No*      | -             |
+| LAST_PROCESSED_STATE  | Base64 encoded message state (Heroku)       | No       | -             |
+
+*Required for Heroku deployment
+
 ### Configuration
 
 1.  Create a `.env` file in the project root.
@@ -81,93 +104,35 @@ After successful authentication, the session file (e.g., `session/new_session.se
 
 If you configured `TG_SESSION=session/new_session`, ensure you move your existing `new_session.session` (if any from previous root runs) into the `session/` directory *before* running the bot, or allow it to create a new one there after authentication.
 
-## Heroku Deployment
+## Deployment
 
-### Initial Setup
+### Heroku Deployment
 
-1. **Create a Heroku app:**
-   ```bash
-   heroku create your-app-name
+The bot is designed to work seamlessly on Heroku:
+
+1. Clone the repository
+2. Create a new Heroku app
+3. Set up a local session by running the bot on your machine
+4. Export the session and message state using the provided script:
    ```
-
-2. **Set up the required environment variables:**
-   ```bash
-   heroku config:set TG_API_ID=your_value --app your-app-name
-   heroku config:set TG_API_HASH=your_value --app your-app-name
-   heroku config:set OPENAI_API_KEY=your_value --app your-app-name
-   heroku config:set SRC_CHANNEL=your_value --app your-app-name
-   heroku config:set DST_CHANNEL=your_value --app your-app-name
-   heroku config:set TG_SESSION=session/test_session_persistent --app your-app-name
+   python export_session.py session/your_session_name
    ```
-
-3. **Handle Session Persistence:**
-   Since Heroku has an ephemeral filesystem (resets every 24 hours), we store session data in environment variables which are permanent:
-   
-   a. Export your session from your local machine:
-   ```bash
-   python export_session.py
+5. Use the setup script to configure Heroku:
    ```
-   
-   b. Set the SESSION_DATA environment variable on Heroku:
-   ```bash
-   heroku config:set SESSION_DATA="your_base64_session_data" --app your-app-name
+   ./setup_heroku.sh your-heroku-app-name
    ```
-   
-   c. How it works:
-   - The `SESSION_DATA` environment variable permanently stores your Telegram credentials
-   - When the bot starts on Heroku, `session_manager.py` automatically:
-     - Reads the `SESSION_DATA` environment variable
-     - Decodes the session data from base64
-     - Creates a temporary session file for the current dyno
-   - This happens automatically whenever the dyno restarts (daily or on deployments)
-   - No manual intervention needed after initial setup
-
-4. **Deploy to Heroku:**
-   ```bash
+6. Deploy to Heroku using Git:
+   ```
    git push heroku main
    ```
-
-5. **Start the worker dyno:**
-   ```bash
-   heroku ps:scale worker=1 --app your-app-name
+7. Scale up the worker dyno:
    ```
+   heroku ps:scale worker=1 --app your-heroku-app-name
+   ```
+
+The session and message state persistence is handled automatically, allowing the bot to maintain its state even when Heroku restarts dynos.
 
 ### Monitoring and Maintenance
 
 - Check logs:
-  ```bash
-  heroku logs --tail --app your-app-name
   ```
-
-- Restart the worker if needed:
-  ```bash
-  heroku ps:restart worker --app your-app-name
-  ```
-
-- View environment variables:
-  ```bash
-  heroku config --app your-app-name
-  ```
-
-- Update session data (if needed):
-  ```bash
-  # Generate new base64 session data on local machine
-  python export_session.py
-  
-  # Update on Heroku with new session data
-  heroku config:set SESSION_DATA="your_new_base64_session_data" --app your-app-name
-  ```
-
-## Maintenance
-
-- Logs are stored in the `logs/` directory (ensure this directory exists or is created by the bot, e.g., via `mkdir -p logs`).
-- The session file is stored as per `TG_SESSION` (recommended: `session/new_session.session`).
-- To update the bot, pull the latest code from your repository:
-  ```bash
-  git pull
-  # then re-run the bot
-  ```
-
-## License
-
-MIT 

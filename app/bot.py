@@ -17,7 +17,7 @@ import openai
 from dotenv import load_dotenv
 from .translator import get_openai_client, translate_text
 from .image_generator import generate_image_for_post
-from .session_manager import setup_session
+from .session_manager import setup_session, get_last_processed_state, save_last_processed_state, update_pts_value
 from telethon.tl.functions.account import UpdateStatusRequest
 from telethon.tl.functions.updates import GetChannelDifferenceRequest
 from telethon.tl.types import InputChannel, ChannelMessagesFilterEmpty
@@ -149,6 +149,20 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
         full_content = f"🔴 RIGHT-BIDLO VERSION:\n\n{translated_text}"
         await send_message_parts(dst_channel_to_use, full_content, image_data, image_url_str)
         logger.info(f"Posted right-bidlo version")
+        
+        # Store the message ID and timestamp for recovery after restarts
+        if message_id is not None:
+            # Get message date if available
+            try:
+                message = await client_instance.get_messages(SRC_CHANNEL, ids=message_id)
+                if message and hasattr(message, 'date'):
+                    save_last_processed_state(message_id, message.date)
+                    logger.debug(f"Updated last processed state with message ID {message_id}")
+                else:
+                    save_last_processed_state(message_id, datetime.now())
+            except Exception as e:
+                logger.warning(f"Could not get message date for ID {message_id}: {e}")
+                save_last_processed_state(message_id, datetime.now())
         
         logger.info(f"Total processing time for message: {time.time() - start_time:.2f} seconds")
         return True
@@ -372,16 +386,26 @@ async def background_channel_poller(client):
             # Create input channel
             input_channel = InputChannel(channel_id=channel.id, access_hash=channel.access_hash)
             
+            # Get stored pts value or use 0 for first run
+            state = get_last_processed_state()
+            pts = state.get("pts", 0)
+            
             # Get channel difference (manual poll for updates)
             try:
+                logger.debug(f"Polling channel with pts={pts}")
                 diff = await client(GetChannelDifferenceRequest(
                     channel=input_channel,
                     filter=ChannelMessagesFilterEmpty(),
-                    pts=0,  # Start from beginning (this should be stored and incremented)
+                    pts=pts,  # Use stored pts value instead of hardcoded 0
                     limit=100
                 ))
                 
                 logger.info(f"Channel polling: received {len(getattr(diff, 'new_messages', []))} new messages")
+                
+                # Update pts value if available
+                if hasattr(diff, 'pts'):
+                    update_pts_value(diff.pts)
+                    logger.debug(f"Updated pts value to {diff.pts}")
                 
                 # Process any new messages found
                 for new_msg in getattr(diff, 'new_messages', []):
@@ -477,6 +501,33 @@ async def main():
     
     # Force initial catch up to ensure we're getting updates
     await client.catch_up()
+    
+    # Check for missed messages during downtime
+    try:
+        state = get_last_processed_state()
+        if state and state.get("message_id", 0) > 0:
+            logger.info(f"Checking for missed messages since last processed message ID: {state.get('message_id')}")
+            
+            # Get messages newer than our last processed message
+            messages = await client.get_messages(
+                SRC_CHANNEL,
+                min_id=state.get("message_id"),
+                limit=10
+            )
+            
+            if messages:
+                logger.info(f"Found {len(messages)} potentially missed messages during downtime")
+                # Process them in order from oldest to newest
+                for msg in reversed(messages):
+                    if not msg.text:
+                        continue
+                    logger.info(f"Processing missed message from downtime recovery: ID {msg.id}")
+                    await translate_and_post(client, msg.text, msg.id)
+                    await asyncio.sleep(1)  # Small delay to prevent rate limiting
+            else:
+                logger.info("No missed messages found during downtime")
+    except Exception as e:
+        logger.error(f"Error checking for missed messages: {e}", exc_info=True)
     
     # Keep the connection running
     await client.run_until_disconnected()
