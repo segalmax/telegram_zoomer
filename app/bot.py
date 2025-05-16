@@ -12,7 +12,8 @@ import uuid
 import re
 from pathlib import Path
 from telethon import TelegramClient, events
-from telethon.network import ConnectionTcpAbridged
+from telethon.network import ConnectionTcpFull, ConnectionTcpAbridged, ConnectionTcpIntermediate
+from telethon.sessions import StringSession
 import openai
 from dotenv import load_dotenv
 from .translator import get_openai_client, translate_text
@@ -449,13 +450,82 @@ async def main():
     session_dir = Path(SESSION_PATH).parent
     session_dir.mkdir(exist_ok=True)
     
-    # Create the client
-    client = TelegramClient(SESSION, API_ID, API_HASH)
+    # Parse command line arguments first to handle process-recent
+    parser = argparse.ArgumentParser(description='Telegram Zoomer Bot')
+    parser.add_argument('--process-recent', type=int, help='Process N recent messages from the source channel')
+    parser.add_argument('--timeout', type=int, default=30, help='Connection timeout in seconds')
+    args = parser.parse_args()
     
+    # Set timeout from arguments or default
+    connection_timeout = args.timeout if args.timeout else 30
+    logger.info(f"Using connection timeout of {connection_timeout} seconds")
+    
+    # Set up connection parameters with fallbacks
+    connection_types = [ConnectionTcpAbridged, ConnectionTcpIntermediate, ConnectionTcpFull]
+    
+    # Try different connection types until one works
+    client = None
+    connected = False
+    
+    for connection_type in connection_types:
+        connection_name = connection_type.__name__
+        logger.info(f"Trying connection type: {connection_name}")
+        
+        # Create a new client with this connection type
+        try:
+            # Use a custom connection with configurable parameters
+            client = TelegramClient(
+                SESSION,
+                API_ID, 
+                API_HASH,
+                connection=connection_type,
+                use_ipv6=False,
+                timeout=connection_timeout,
+                retry_delay=1,
+                auto_reconnect=True,
+                sequential_updates=False,
+                flood_sleep_threshold=60
+            )
+            
+            # Try to connect with timeout
+            logger.info(f"Connecting with timeout {connection_timeout}s...")
+            try:
+                # Use asyncio.wait_for to enforce a timeout
+                await asyncio.wait_for(
+                    client.connect(),
+                    timeout=connection_timeout
+                )
+            except asyncio.TimeoutError:
+                logger.warning(f"Connection timed out after {connection_timeout}s")
+                if client: await client.disconnect()
+                continue
+            except Exception as e:
+                logger.warning(f"Connection error: {str(e)}")
+                if client: await client.disconnect()
+                continue
+            
+            # Check if connection succeeded
+            if client.is_connected():
+                logger.info("Successfully connected to Telegram")
+                connected = True
+                break
+            else:
+                logger.warning("Failed to connect")
+                if client: await client.disconnect()
+                
+        except Exception as e:
+            logger.warning(f"Error setting up connection: {str(e)}")
+            if client: 
+                try: await client.disconnect()
+                except: pass
+    
+    # If we couldn't connect with any method, exit
+    if not connected or not client:
+        logger.error("Failed to connect to Telegram with any connection method. Please check your network.")
+        return False
+    
+    # Now try to authenticate
     try:
-        # Try to connect without code input first (if session exists)
-        logger.info("Attempting to connect using saved session...")
-        await client.connect()
         if await client.is_user_authorized():
             logger.info("Successfully authenticated using saved session")
         else:
@@ -463,26 +533,23 @@ async def main():
             logger.info("Saved session not valid, attempting phone authentication...")
             await client.start(phone=PHONE)
     except Exception as e:
-        logger.error(f"Error connecting with saved session: {str(e)}")
-        # Fall back to regular authentication
-        await client.start(phone=PHONE)
+        logger.error(f"Error authenticating: {str(e)}")
+        await client.disconnect()
+        return False
     
     logger.info("Client started successfully")
     
     # Check if user is authorized
     if not await client.is_user_authorized():
         logger.error("User is not authorized. Please check your session file or authentication.")
+        await client.disconnect()
         return False
     
     # Handle the --process-recent argument
-    parser = argparse.ArgumentParser(description='Telegram Zoomer Bot')
-    parser.add_argument('--process-recent', type=int, help='Process N recent messages from the source channel')
-    args = parser.parse_args()
-    
     if args.process_recent:
-        await process_recent_messages(client, args.process_recent)
+        success = await process_recent_messages(client, args.process_recent)
         await client.disconnect()
-        return True
+        return success
     
     # Register event handler for new messages
     @client.on(events.NewMessage(chats=SRC_CHANNEL))
@@ -500,7 +567,13 @@ async def main():
     logger.info(f"Image generation: {'Enabled' if GENERATE_IMAGES else 'Disabled'}")
     
     # Force initial catch up to ensure we're getting updates
-    await client.catch_up()
+    try:
+        await asyncio.wait_for(client.catch_up(), timeout=30)
+        logger.info("Initial catch-up completed")
+    except asyncio.TimeoutError:
+        logger.warning("Initial catch-up timed out, continuing anyway")
+    except Exception as e:
+        logger.warning(f"Error during initial catch-up: {e}, continuing anyway")
     
     # Check for missed messages during downtime
     try:
