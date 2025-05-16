@@ -17,6 +17,7 @@ import openai
 from dotenv import load_dotenv
 from .translator import get_openai_client, translate_text
 from .image_generator import generate_image_for_post
+from .session_manager import setup_session
 from telethon.tl.functions.account import UpdateStatusRequest
 from telethon.tl.functions.updates import GetChannelDifferenceRequest
 from telethon.tl.types import InputChannel, ChannelMessagesFilterEmpty
@@ -68,8 +69,9 @@ except (TypeError, ValueError) as e:
     sys.exit("Critical environment variables missing or invalid. Exiting.")
 
 TG_PHONE = os.getenv('TG_PHONE') # Optional, bot will prompt
-SESSION_DEFAULT = 'session/new_session' if (Path(__file__).resolve().parent.parent / 'session').is_dir() else 'new_session'
-SESSION = os.getenv('TG_SESSION', SESSION_DEFAULT)
+
+# Use session manager to handle session persistence
+SESSION = setup_session()
 
 if not SRC_CHANNEL or not DST_CHANNEL:
     logger.error("Error: SRC_CHANNEL or DST_CHANNEL is not set in .env.")
