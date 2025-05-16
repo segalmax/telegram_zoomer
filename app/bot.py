@@ -426,10 +426,23 @@ async def main():
     session_dir.mkdir(exist_ok=True)
     
     # Create the client
-    client = TelegramClient(SESSION_PATH, API_ID, API_HASH)
+    client = TelegramClient(SESSION, API_ID, API_HASH)
     
-    # Start the client
-    await client.start(phone=PHONE)
+    try:
+        # Try to connect without code input first (if session exists)
+        logger.info("Attempting to connect using saved session...")
+        await client.connect()
+        if await client.is_user_authorized():
+            logger.info("Successfully authenticated using saved session")
+        else:
+            # If not authorized, then try regular authentication
+            logger.info("Saved session not valid, attempting phone authentication...")
+            await client.start(phone=PHONE)
+    except Exception as e:
+        logger.error(f"Error connecting with saved session: {str(e)}")
+        # Fall back to regular authentication
+        await client.start(phone=PHONE)
+    
     logger.info("Client started successfully")
     
     # Check if user is authorized
