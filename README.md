@@ -81,6 +81,83 @@ After successful authentication, the session file (e.g., `session/new_session.se
 
 If you configured `TG_SESSION=session/new_session`, ensure you move your existing `new_session.session` (if any from previous root runs) into the `session/` directory *before* running the bot, or allow it to create a new one there after authentication.
 
+## Heroku Deployment
+
+### Initial Setup
+
+1. **Create a Heroku app:**
+   ```bash
+   heroku create your-app-name
+   ```
+
+2. **Set up the required environment variables:**
+   ```bash
+   heroku config:set TG_API_ID=your_value --app your-app-name
+   heroku config:set TG_API_HASH=your_value --app your-app-name
+   heroku config:set OPENAI_API_KEY=your_value --app your-app-name
+   heroku config:set SRC_CHANNEL=your_value --app your-app-name
+   heroku config:set DST_CHANNEL=your_value --app your-app-name
+   heroku config:set TG_SESSION=session/test_session_persistent --app your-app-name
+   ```
+
+3. **Handle Session Persistence:**
+   Since Heroku has an ephemeral filesystem (resets every 24 hours), we store session data in environment variables which are permanent:
+   
+   a. Export your session from your local machine:
+   ```bash
+   python export_session.py
+   ```
+   
+   b. Set the SESSION_DATA environment variable on Heroku:
+   ```bash
+   heroku config:set SESSION_DATA="your_base64_session_data" --app your-app-name
+   ```
+   
+   c. How it works:
+   - The `SESSION_DATA` environment variable permanently stores your Telegram credentials
+   - When the bot starts on Heroku, `session_manager.py` automatically:
+     - Reads the `SESSION_DATA` environment variable
+     - Decodes the session data from base64
+     - Creates a temporary session file for the current dyno
+   - This happens automatically whenever the dyno restarts (daily or on deployments)
+   - No manual intervention needed after initial setup
+
+4. **Deploy to Heroku:**
+   ```bash
+   git push heroku main
+   ```
+
+5. **Start the worker dyno:**
+   ```bash
+   heroku ps:scale worker=1 --app your-app-name
+   ```
+
+### Monitoring and Maintenance
+
+- Check logs:
+  ```bash
+  heroku logs --tail --app your-app-name
+  ```
+
+- Restart the worker if needed:
+  ```bash
+  heroku ps:restart worker --app your-app-name
+  ```
+
+- View environment variables:
+  ```bash
+  heroku config --app your-app-name
+  ```
+
+- Update session data (if needed):
+  ```bash
+  # Generate new base64 session data on local machine
+  python export_session.py
+  
+  # Update on Heroku with new session data
+  heroku config:set SESSION_DATA="your_new_base64_session_data" --app your-app-name
+  ```
+
 ## Maintenance
 
 - Logs are stored in the `logs/` directory (ensure this directory exists or is created by the bot, e.g., via `mkdir -p logs`).
