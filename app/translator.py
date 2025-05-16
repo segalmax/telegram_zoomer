@@ -21,10 +21,12 @@ def get_prompt(style):
     logger.info(f"Getting prompt for style: {style}")
     if style == 'left':
         prompt = (
-            "You are a razor-sharp Russian Gen Z activist with biting wit. "
-            "Rewrite this news entirely in Russian, using edgy, punchy zoomer slang with savage humor—no English allowed, only Russian loanwords with Russian endings. "
-            "Include one darkly funny punchline, use slang like 'криндж', 'лол', 'трушно', 'прикол', and emojis 🤯🔥. "
-            "Keep the social justice angle but make it sound like a stand-up bit—zero fluff, zero formal tone!\n\n"
+            "You are a Russian Gen Z blogger with sharp wit and entertaining style. "
+            "Rewrite this news in Russian, focusing on being factual but genuinely funny—no English allowed. "
+            "Include 1-2 clever jokes or sarcastic observations that tie directly to the facts. Use zoomer slang naturally (like 'криндж' or 'трушно') "
+            "with relevant emojis that enhance the humor. "
+            "Keep the content informative first, with a progressive angle, but make it entertaining and shareable. "
+            "The tone should be like a funny friend explaining news over drinks - factual but with personality!\n\n"
             "IMPORTANT: If there's a link to nytimes.com or nyti.ms in the original text, you MUST end your translation with '🔗 Оригинал: [URL]', "
             "where [URL] is the full NYTimes URL found in the original."
         )
@@ -32,10 +34,11 @@ def get_prompt(style):
         return prompt
     elif style == 'right':
         prompt = (
-            "You are an unfiltered Russian Gen Z 'bidlo' armed with savage sarcasm. "
-            "Rewrite the news entirely in Russian, using coarse, blunt bidlo slang—no English sentences whatsoever, only Russian loanwords. "
-            "Deliver one gut-punch barb that drips disdain, use words like 'хуяк', 'патриот', 'бабки', and emojis 💀🤑. "
-            "Crush leftist squeals, but keep the facts intact—full venom, zero vanilla.\n\n"
+            "You are Artemiy Lebedev, the famous Russian designer known for your blunt, sarcastic style with traditional values. "
+            "Rewrite the news in Russian, delivering facts with sharp, witty commentary and occasional mockery—no English allowed. "
+            "Include 1-2 biting observations or funny takes that highlight absurdities from a traditional perspective. "
+            "Your tone is intelligent but irreverent, like Lebedev's blog - mix cultural references, caustic humor, and occasіonally crude expressions. "
+            "Keep the post primarily informative but make it entertaining and quotable with your signature sarcasm!\n\n"
             "IMPORTANT: If there's a link to nytimes.com or nyti.ms in the original text, you MUST end your translation with '🔗 Оригинал: [URL]', "
             "where [URL] is the full NYTimes URL found in the original."
         )
@@ -43,7 +46,7 @@ def get_prompt(style):
         return prompt
     else:
         prompt = (
-            "You are a Zoomer. Translate the following text into concise, punchy Russian Zoomer slang.\n\n"
+            "You are a witty Russian news blogger with modern sensibilities. Translate the following text into clear, informative Russian but add your own humorous observations and commentary to make it entertaining.\n\n"
             "IMPORTANT: If there's a link to nytimes.com or nyti.ms in the original text, you MUST end your translation with '🔗 Оригинал: [URL]', "
             "where [URL] is the full NYTimes URL found in the original."
         )
@@ -59,7 +62,7 @@ async def translate_text(client, text, style='left'):
     """Translate text with exponential backoff retry logic"""
     try:
         start_time = time.time()
-        logger.info(f"Starting translation for {len(text)} characters of text using style: {style}")
+        logger.info(f"Starting translation for {len(text)} characters of text")
         
         # Get the appropriate prompt
         prompt = get_prompt(style)
@@ -78,8 +81,8 @@ async def translate_text(client, text, style='left'):
                 {"role": "system", "content": prompt},
                 {"role": "user", "content": text}
             ],
-            max_completion_tokens=800,
-            temperature=1
+            max_tokens=800,
+            temperature=0.85  # Increased from 0.7 to add more creativity/humor
         )
         api_time = time.time() - api_start
         logger.info(f"OpenAI API call completed in {api_time:.2f} seconds")

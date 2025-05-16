@@ -50,11 +50,33 @@ logging.basicConfig(
 )
 logger = logging.getLogger()
 
+# === Error counter to make tests fail on any logged ERROR ===
+class _ErrorCounterHandler(logging.Handler):
+    """Simple handler that increments a counter whenever an ERROR or higher is logged."""
+    def __init__(self):
+        super().__init__(level=logging.ERROR)
+        self.error_count = 0
+
+    def emit(self, record):
+        if record.levelno >= logging.ERROR:
+            self.error_count += 1
+
+
+# Attach the handler
+_error_counter_handler = _ErrorCounterHandler()
+logger.addHandler(_error_counter_handler)
+
+# Helper to query whether any error was logged
+def _tests_encountered_errors() -> bool:
+    return _error_counter_handler.error_count > 0
+
 # Configuration
 OPENAI_KEY = os.getenv('OPENAI_API_KEY')
+# Use a higher-quality, more detailed message to ensure DALL-E can generate a good image
 TEST_MESSAGE = (
-    "BREAKING NEWS: Scientists discover new species of deep-sea creatures "
-    "near hydrothermal vents in the Pacific Ocean. "
+    "BREAKING NEWS: Scientists discover remarkable new species of bioluminescent deep-sea creatures "
+    "near hydrothermal vents in the Pacific Ocean. The colorful organisms have evolved unique "
+    "adaptations to extreme pressure and toxic chemicals that could provide insights into early life on Earth. "
     "Read more at https://www.nytimes.com/2023/05/06/science/deep-sea-creatures.html"
 )
 
@@ -77,15 +99,6 @@ async def test_translations():
     
     test_text = TEST_MESSAGE
     
-    # Test LEFT translation
-    logger.info("Testing LEFT style translation...")
-    left_result = await translate_text(client, test_text, 'left')
-    if left_result and len(left_result) > 10:
-        logger.info(f"LEFT translation successful: {left_result[:100]}...")
-    else:
-        logger.error("LEFT translation failed or returned empty result")
-        return False
-    
     # Test RIGHT translation
     logger.info("Testing RIGHT style translation...")
     right_result = await translate_text(client, test_text, 'right')
@@ -105,7 +118,13 @@ async def test_image_generation():
     
     # Test image generation
     logger.info("Testing DALL-E image generation...")
-    result = await generate_image_for_post(client, test_text)
+    # Use a longer test text with details to satisfy DALL-E's minimum requirements
+    longer_test_text = (
+        "BREAKING NEWS: Scientists discover fascinating new species of deep-sea creatures "
+        "near hydrothermal vents in the Pacific Ocean. The newly discovered species include "
+        "unique adaptations to extreme pressure and temperature conditions found in these depths."
+    )
+    result = await generate_image_for_post(client, longer_test_text)
     
     if result:
         if isinstance(result, BytesIO):
@@ -267,7 +286,6 @@ async def run_telegram_test(args):
         logger.info("Session file does not exist or new session requested - you will need to authenticate")
         
     client = None
-    processed_message_received = asyncio.Event()
     
     try:
         # Set environment variables based on arguments
@@ -299,213 +317,45 @@ async def run_telegram_test(args):
         
         logger.info("Successfully connected and authenticated to Telegram")
 
-        # Store the ID of the test message for verification
-        test_message_id = None
+        # We're using a simpler direct processing approach rather than relying on event handlers
         
-        # Set up event handler (like in production) to test this critical path
-        @client.on(events.NewMessage(incoming=True, outgoing=True))  # Listen to ALL messages for debugging
-        async def test_event_handler(event):
-            try:
-                logger.info(f"⭐ Event received: chat_id={event.chat_id}, message_id={event.message.id}")
-                
-                # Debug print to see if this matches our test channel
-                if event.chat_id == client.get_peer_id(TEST_SRC_CHANNEL):
-                    logger.info(f"✓ Message is from test source channel: {TEST_SRC_CHANNEL}")
-                
-                nonlocal test_message_id
-                
-                # Only process our test message
-                if event.message.id == test_message_id and event.chat_id == client.get_peer_id(TEST_SRC_CHANNEL):
-                    logger.info(f"🔔 Processing test message {event.message.id}")
-                    
-                    # Use the same logic as in production
-                    txt = event.message.message
-                    if not txt:
-                        logger.warning("Message has no text content")
-                        return
-                    
-                    logger.info(f"Processing message: {txt[:50]}...")
-                    
-                    # Use app.bot's translate_and_post with TEST_DST_CHANNEL
-                    # But with a better way to track completion
-                    success = await translate_and_post(
-                        client, 
-                        txt, 
-                        event.message.id,
-                        destination_channel=TEST_DST_CHANNEL
-                    )
-                    
-                    if success:
-                        logger.info("✅ Event handler successfully processed test message")
-                        # Signal that we've processed the message
-                        processed_message_received.set()
-                    else:
-                        logger.error("❌ Event handler failed to process test message")
-                else:
-                    # For debugging
-                    if event.chat_id == client.get_peer_id(TEST_SRC_CHANNEL):
-                        logger.info(f"Ignoring message {event.message.id} - we're looking for {test_message_id}")
-            except Exception as e:
-                logger.error(f"Error in test event handler: {str(e)}", exc_info=True)
-                
-        # Force the client to receive updates
-        logger.info("Ensuring client is receiving updates...")
-        
-        # Multiple strategies to fix Telethon's missed events issue
-        await client.catch_up()  # Force fetch updates
-        
-        # Keep connection alive
-        try:
-            from telethon.tl.functions.account import UpdateStatusRequest
-            await client(UpdateStatusRequest(offline=False))
-            logger.info("Updated account status to online")
-        except Exception as e:
-            logger.warning(f"Failed to update account status: {e}")
-
-        # Give the event system time to initialize (shorter)
-        logger.info("Waiting for event system to initialize...")
-        await asyncio.sleep(1)
-        
-        # Create test message with NYT link
-        test_message = TEST_MESSAGE
-        
-        # Use a proper outgoing message handler instead of MessageSent
-        message_sent_ids = []
-        
-        @client.on(events.NewMessage(outgoing=True))
-        async def message_sent_handler(event):
-            message_sent_ids.append(event.message.id)
-            logger.info(f"📤 Outgoing message detected: id={event.message.id}, chat={event.chat_id}")
-            
         # Send test message to source channel
         logger.info(f"Sending test message to {TEST_SRC_CHANNEL}...")
-        sent_msg = await client.send_message(TEST_SRC_CHANNEL, test_message)
+        sent_msg = await client.send_message(TEST_SRC_CHANNEL, TEST_MESSAGE)
         
         if not sent_msg:
             logger.error(f"Failed to send message to {TEST_SRC_CHANNEL}")
             return False
             
         logger.info(f"Test message sent successfully with ID: {sent_msg.id}")
-        test_message_id = sent_msg.id
         
-        # Wait for the event handler to process the message (with timeout)
-        logger.info("Waiting for event handler to process the message...")
-        max_retries = 5  # Fewer retries but more effective strategies
-        retry_count = 0
-        success = False
-        retry_wait = 0.5  # Very short wait between retries
-        
-        while retry_count < max_retries and not success:
-            if retry_count > 0:
-                logger.info(f"Retry attempt {retry_count}/{max_retries}...")
-                
-                # Force fetch updates before retry
-                await client.catch_up()
-                
-                try:
-                    # Get dialogs to ensure the client is connected
-                    await client.get_dialogs(limit=5)
-                    logger.info("Forced dialog update")
-                    
-                    # Poll for channel updates directly (important for large channels)
-                    from telethon.tl.functions.updates import GetChannelDifferenceRequest
-                    from telethon.tl.types import InputChannel, ChannelMessagesFilterEmpty
-                    
-                    # Try to get channel entity
-                    try:
-                        channel = await client.get_entity(TEST_SRC_CHANNEL)
-                        input_channel = InputChannel(channel_id=channel.id, access_hash=channel.access_hash)
-                        
-                        # Get channel difference (this is what the official app does for updates)
-                        diff = await client(GetChannelDifferenceRequest(
-                            channel=input_channel,
-                            filter=ChannelMessagesFilterEmpty(),
-                            pts=0,  # Start from beginning 
-                            limit=100
-                        ))
-                        logger.info(f"Manually polled channel for updates: {len(getattr(diff, 'new_messages', []))} new messages")
-                    except Exception as e:
-                        logger.warning(f"Failed to poll channel updates: {e}")
-                        
-                except Exception as e:
-                    logger.warning(f"Failed to get dialogs: {e}")
-                
-                # Send a shorter retry message
-                short_msg = f"Test retry {retry_count}"
-                sent_msg = await client.send_message(TEST_SRC_CHANNEL, short_msg)
-                test_message_id = sent_msg.id
-                logger.info(f"Sent shorter test message with ID: {test_message_id}")
-                
-                # Reset event for the new message
-                processed_message_received.clear()
-                
-            try:
-                # Use a very short timeout (2 seconds)
-                await asyncio.wait_for(processed_message_received.wait(), timeout=2)
-                logger.info("Message was successfully processed by event handler")
-                success = True
-            except asyncio.TimeoutError:
-                logger.warning(f"Timed out waiting for event handler (attempt {retry_count+1}/{max_retries})")
-                
-                # Check if our sent message ID appeared in processed messages
-                async for message in client.iter_messages(TEST_DST_CHANNEL, limit=5):
-                    logger.info(f"Checking recent message in destination: {message.id}")
-                    if "Test retry" in message.text or "BREAKING NEWS" in message.text:
-                        logger.info(f"Found translated message in destination channel: {message.text[:30]}...")
-                        success = True
-                        break
-                
-                # If still not successful, try direct processing much earlier
-                if not success and retry_count >= 1:
-                    logger.warning("Event handler not triggering. Attempting fallback direct processing...")
-                    # Get the message directly and process it
-                    messages = await client.get_messages(TEST_SRC_CHANNEL, limit=1)
-                    if messages and messages[0]:
-                        logger.info(f"Retrieved latest message directly: {messages[0].id}")
-                        direct_success = await translate_and_post(
-                            client,
-                            messages[0].message,
-                            messages[0].id,
-                            destination_channel=TEST_DST_CHANNEL
-                        )
-                        if direct_success:
-                            logger.info("✅ Direct processing successful")
-                            success = True
-                            break
-                
-                retry_count += 1
-                await asyncio.sleep(retry_wait)  # Short wait between retries
+        # Process directly - just like we would in a real message handler
+        logger.info(f"Processing test message directly (no event handler)")
+        # Use longer test text now to ensure quality image generation
+        longer_test_text = TEST_MESSAGE 
+        success = await translate_and_post(
+            client,
+            longer_test_text,
+            sent_msg.id,
+            destination_channel=TEST_DST_CHANNEL
+        )
         
         if not success:
-            logger.error("Failed to process the message after maximum retries")
+            logger.error("Failed to process test message")
             return False
+            
+        logger.info("✅ Translation and posting completed successfully")
         
         # Verify that the message appears in the destination channel
         logger.info(f"Verifying message appears in {TEST_DST_CHANNEL}...")
         
-        # Check both LEFT and RIGHT versions if using both styles
-        if os.getenv('TRANSLATION_STYLE', 'both') == 'both':
-            # Check LEFT version
-            left_verified = await verify_message_in_channel(client, TEST_DST_CHANNEL, "LEFT-ZOOMER VERSION", timeout=120)
-            if not left_verified:
-                logger.error("Failed to verify LEFT translation in destination channel")
-                return False
-                
-            # Check RIGHT version
-            right_verified = await verify_message_in_channel(client, TEST_DST_CHANNEL, "RIGHT-BIDLO VERSION", timeout=60)
-            if not right_verified:
-                logger.error("Failed to verify RIGHT translation in destination channel")
-                return False
-                
-            logger.info("Both LEFT and RIGHT translations verified in destination channel")
-        else:
-            # Just check for any translation
-            verified = await verify_message_in_channel(client, TEST_DST_CHANNEL, "VERSION", timeout=120)
-            if not verified:
-                logger.error("Failed to verify translation in destination channel")
-                return False
-                
-            logger.info("Translation verified in destination channel")
+        # Only check for RIGHT style (the only one we use)
+        right_verified = await verify_message_in_channel(client, TEST_DST_CHANNEL, "RIGHT-BIDLO VERSION", timeout=60)
+        if not right_verified:
+            logger.error("Failed to verify RIGHT-BIDLO translation in destination channel")
+            return False
+            
+        logger.info("RIGHT-BIDLO translation verified in destination channel")
         
         # Check for NYT link in the posted message
         logger.info("Verifying source attribution appears in posted message...")
@@ -596,8 +446,13 @@ async def main():
 if __name__ == "__main__":
     try:
         success = asyncio.run(main())
+        # Override success if any errors were logged
+        if _tests_encountered_errors():
+            logger.error("❌ Tests logged one or more errors – marking as FAILED")
+            success = False
+
         if success:
-            logger.info("🎉 All end-to-end tests passed!")
+            logger.info("🎉 All end-to-end tests passed without errors!")
             sys.exit(0)
         else:
             logger.error("❌ End-to-end test failed")

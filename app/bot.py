@@ -39,7 +39,7 @@ PHONE = os.getenv('PHONE') or os.getenv('TG_PHONE')  # Check both variable names
 SESSION_PATH = os.getenv('SESSION_PATH', 'session/nyt_zoomer')
 SRC_CHANNEL = os.getenv('SRC_CHANNEL')
 DST_CHANNEL = os.getenv('DST_CHANNEL')
-TRANSLATION_STYLE = os.getenv('TRANSLATION_STYLE', 'both')  # left, right, both
+TRANSLATION_STYLE = os.getenv('TRANSLATION_STYLE', 'right')  # right only by default
 GENERATE_IMAGES = os.getenv('GENERATE_IMAGES', 'true').lower() == 'true'
 OPENAI_KEY = os.getenv('OPENAI_API_KEY')
 PROCESS_RECENT = os.getenv('PROCESS_RECENT', 0)
@@ -93,9 +93,14 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
         logger.info(f"Using destination channel: {dst_channel_to_use}")
         
         image_data = None
-        image_url_str = None # Renamed from image_url to avoid confusion
+        image_url_str = None  # Renamed from image_url to avoid confusion
         
-        if GENERATE_IMAGES and openai_client:
+        # Re-evaluate GENERATE_IMAGES at runtime so that tests
+        # can control it via environment variables _after_ this module
+        # has already been imported.
+        generate_images = os.getenv("GENERATE_IMAGES", "true").lower() == "true"
+
+        if generate_images and openai_client:
             logger.info("Generating image for post...")
             result = await generate_image_for_post(openai_client, txt)
             if result:
@@ -107,7 +112,7 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
                     logger.info("Image data received successfully")
             else:
                 logger.warning("No image result was returned")
-        elif not openai_client and GENERATE_IMAGES:
+        elif not openai_client and generate_images:
             logger.warning("Image generation is enabled, but OpenAI client is not initialized (missing API key?).")
 
         # Always include source attribution, even when URL is not available
@@ -129,34 +134,19 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
             else:
                 await client_instance.send_message(channel, text_content)
 
-        if TRANSLATION_STYLE == 'both':
-            if not openai_client:
-                logger.error("Cannot translate in 'both' style without OpenAI client.")
-                return False
-            logger.info("Translating in LEFT style...")
-            left = await translate_text(openai_client, txt, 'left')
-            logger.info("Posting LEFT translation...")
-            await client_instance.send_message(dst_channel_to_use, "🟢 LEFT-ZOOMER VERSION:")
-            await send_message_parts(dst_channel_to_use, left, image_data, image_url_str)
-            logger.info("Posted left-leaning version")
-
-            logger.info("Translating in RIGHT style...")
-            right = await translate_text(openai_client, txt, 'right')
-            logger.info("Posting RIGHT translation...")
-            await client_instance.send_message(dst_channel_to_use, "🔴 RIGHT-BIDLO VERSION:")
-            await send_message_parts(dst_channel_to_use, right) # No image for the second part
-            logger.info("Posted right-wing version")
-        else: # 'left' or 'right'
-            if not openai_client:
-                logger.error(f"Cannot translate in '{TRANSLATION_STYLE}' style without OpenAI client.")
-                return False
-            style = TRANSLATION_STYLE
-            logger.info(f"Translating in {style.upper()} style...")
-            translated_text = await translate_text(openai_client, txt, style)
-            header = "🟢 LEFT-ZOOMER VERSION:" if style == 'left' else "🔴 RIGHT-BIDLO VERSION:"
-            await client_instance.send_message(dst_channel_to_use, header)
-            await send_message_parts(dst_channel_to_use, translated_text, image_data, image_url_str)
-            logger.info(f"Posted {style}-style version")
+        # Use only RIGHT style - much simpler logic
+        if not openai_client:
+            logger.error("Cannot translate without OpenAI client.")
+            return False
+        
+        # Only support right style
+        logger.info("Translating in RIGHT-BIDLO style...")
+        translated_text = await translate_text(openai_client, txt, 'right')
+        
+        # Combine header with translated content instead of sending separately
+        full_content = f"🔴 RIGHT-BIDLO VERSION:\n\n{translated_text}"
+        await send_message_parts(dst_channel_to_use, full_content, image_data, image_url_str)
+        logger.info(f"Posted right-bidlo version")
         
         logger.info(f"Total processing time for message: {time.time() - start_time:.2f} seconds")
         return True
