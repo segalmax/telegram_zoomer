@@ -1,0 +1,19 @@
+{
+  "name": "NYT Zoomer Bot",
+  "description": "A bot that translates posts from one Telegram channel to another in zoomer slang",
+  "repository": "https://github.com/yourusername/nyt-zoomer-bot",
+  "scripts": {
+    "postdeploy": "python -m app.bot"
+  },
+  "formation": {
+    "worker": {
+      "quantity": 1,
+      "size": "basic"
+    }
+  },
+  "buildpacks": [
+    {
+      "url": "heroku/python"
+    }
+  ]
+} 

@@ -66,8 +66,16 @@
 - [x] Use `.env` file for all configurations
 - [x] Document all required environment variables in `README.md`
 
-## Deployment & Operations (Simplified for MVP tracking)
+## Deployment & Operations
 - [x] Basic `README.md` with setup and run instructions (reviewed/updated)
+- [x] Heroku deployment configuration
+    - [x] Procfile for worker process
+    - [x] runtime.txt for Python version (3.10.12)
+    - [x] Session persistence via `session_manager.py` for Heroku's ephemeral filesystem
+    - [x] Environment-based session storage (using base64-encoded session data)
+    - [x] Optimized authentication flow to use saved session without code prompts
+- [x] Background keep-alive processes to maintain Telegram connection
+- [x] End-to-end automated tests with Telegram authentication
 
 ## Future Ideas / Nice-to-Haves (Backlog)
 - [x] More sophisticated image generation prompts:
