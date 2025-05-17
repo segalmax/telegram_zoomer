@@ -44,11 +44,11 @@ API_ID = os.getenv('TG_API_ID')
 API_HASH = os.getenv('TG_API_HASH')
 TG_PHONE = os.getenv('TG_PHONE')
 TEST_SRC_CHANNEL = os.getenv('TEST_SRC_CHANNEL')
-TEST_SESSION = os.getenv('TEST_SESSION', 'session/polling_test_session')
-MESSAGE_PREFIX = "POLLING-TEST-"  # Prefix to identify test messages
+SENDER_SESSION_NAME = "session/sender_test_session" # Persistent session for this script
+MESSAGE_PREFIX = f"POLLING-TEST-{uuid.uuid4().hex[:8]}"  # Unique prefix for each run
 
 # Define a random test message
-TEST_MESSAGE = f"{MESSAGE_PREFIX}{uuid.uuid4().hex[:8]}: BREAKING NEWS: Researchers confirm that properly implemented polling mechanism works flawlessly. In a surprising discovery, scientists found that short-polling at regular intervals ensures reliable message delivery even in large channels. Read more at https://www.nytimes.com/2024/06/22/technology/polling-telegram-megachannels.html"
+TEST_MESSAGE = f"{MESSAGE_PREFIX}: BREAKING NEWS: Researchers confirm that properly implemented polling mechanism works flawlessly. In a surprising discovery, scientists found that short-polling at regular intervals ensures reliable message delivery even in large channels. Read more at https://www.nytimes.com/2024/06/22/technology/polling-telegram-megachannels.html"
 
 async def send_test_message():
     """Send a test message to the test source channel"""
@@ -58,33 +58,38 @@ async def send_test_message():
         logger.error("Missing required environment variables. Check your .env file.")
         return False
     
+    logger.info(f"Using persistent sender session: {SENDER_SESSION_NAME}")
+    
     # Create session directory if needed
-    Path(os.path.dirname(TEST_SESSION)).mkdir(parents=True, exist_ok=True)
+    Path(os.path.dirname(SENDER_SESSION_NAME)).mkdir(parents=True, exist_ok=True)
     
     # Create and start client
-    client = TelegramClient(
-        TEST_SESSION,
-        int(API_ID),
-        API_HASH,
-        connection=ConnectionTcpAbridged
-    )
-    
+    client = None
     try:
+        client = TelegramClient(
+            SENDER_SESSION_NAME,
+            int(API_ID),
+            API_HASH,
+            connection=ConnectionTcpAbridged
+        )
+        
         # Start client
-        await client.start(phone=TG_PHONE)
+        logger.info("Connecting and authenticating sender session...")
+        await client.start(phone=TG_PHONE) # This will prompt for code if session is new or invalid
         
         if not await client.is_user_authorized():
-            logger.error("Authorization failed. Check your credentials.")
+            logger.error("Authorization failed for sender session. Please run manually to authorize.")
             return False
+        logger.info("Sender session authorized.")
         
-        logger.info(f"Sending test message to {TEST_SRC_CHANNEL}...")
+        logger.info(f"Sending test message to {TEST_SRC_CHANNEL} with prefix {MESSAGE_PREFIX}...")
         
         # Send the test message
         sent_msg = await client.send_message(TEST_SRC_CHANNEL, TEST_MESSAGE)
         
         if sent_msg:
             logger.info(f"Test message sent successfully with ID: {sent_msg.id}")
-            logger.info(f"Message: {TEST_MESSAGE[:50]}...")
+            logger.info(f"Message: {TEST_MESSAGE[:70]}...")
             logger.info(f"Wait a moment for the bot to detect and process this message via polling")
             return True
         else:
@@ -92,17 +97,22 @@ async def send_test_message():
             return False
     
     except Exception as e:
-        logger.error(f"Error: {str(e)}")
+        logger.error(f"Error in send_test_message: {str(e)}", exc_info=True)
         return False
     finally:
-        await client.disconnect()
-        logger.info("Disconnected from Telegram")
+        if client and client.is_connected():
+            await client.disconnect()
+            logger.info("Disconnected from Telegram")
+        
+        # No longer cleaning up session files as this is a persistent session
 
 if __name__ == "__main__":
     # Run the send_test_message function
     if asyncio.run(send_test_message()):
-        logger.info("✅ Test message sent successfully")
+        logger.info(f"✅ Test message ({MESSAGE_PREFIX}) sent successfully using {SENDER_SESSION_NAME}")
         logger.info("Now watch your bot's log output to see if it detects and processes this message")
+        # Pass the unique message prefix to stdout for the calling script to capture
+        print(f"MESSAGE_PREFIX_SENT:{MESSAGE_PREFIX}")
         sys.exit(0)
     else:
         logger.error("❌ Failed to send test message")

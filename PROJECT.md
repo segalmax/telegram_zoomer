@@ -77,6 +77,14 @@
 - [x] Background keep-alive processes to maintain Telegram connection
 - [x] End-to-end automated tests with Telegram authentication
 
+## Heroku / State Persistence Details
+- **Telethon Session**: The core Telegram session file (`.session`) is stored as a Base64 encoded string in the `TG_SESSION_STRING` environment variable. `app.session_manager.setup_session()` recreates the session file from this variable on startup.
+- **Application State**: Other application state, such as the last processed message ID, timestamp, and PTS (Poll Tracking State) for channel polling, is stored as a Base64 encoded JSON string in the `LAST_PROCESSED_STATE` environment variable.
+  - `app.session_manager.load_app_state()` loads this state on startup, falling back to a local `session/app_state.json` file (for local development) or defaults if neither is found.
+  - `app.session_manager.save_app_state(state_data)` saves the current state to `session/app_state.json` and also logs the Base64 encoded string that should be set as `LAST_PROCESSED_STATE` on Heroku. This ensures that even if the bot restarts, it can resume from where it left off.
+- **Setup Script**: `setup_heroku.sh` automates setting these (and other) environment variables on Heroku. It uses `export_session.py` to generate the necessary Base64 strings from your local, authenticated session and current application state file.
+- **Obsolete Variables**: `SESSION_DATA`, `CHANNEL_PTS_DATA`, and `USE_ENV_PTS_STORAGE` are now obsolete and should be removed from Heroku config if present. `setup_heroku.sh` attempts to unset them.
+
 ## Future Ideas / Nice-to-Haves (Backlog)
 - [x] More sophisticated image generation prompts:
     - [x] Caricature style for political figures

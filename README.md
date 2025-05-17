@@ -32,19 +32,16 @@ The bot is configured through environment variables set in a `.env` file or via 
 | OPENAI_API_KEY        | OpenAI API key                              | Yes      | -             |
 | SRC_CHANNEL           | Source channel to monitor                   | Yes      | -             |
 | DST_CHANNEL           | Destination channel to post translations    | Yes      | -             |
-| TG_SESSION            | Path to session file (without .session ext) | No       | session/nyt_zoomer |
+| TG_SESSION            | Session name for local runs (e.g., `session/my_bot`) | No       | `session/default_persistent_bot_session` |
 | GENERATE_IMAGES       | Whether to generate images for posts        | No       | true          |
 | TRANSLATION_STYLE     | Translation style (only 'right' supported)  | No       | right         |
-| CHECK_CHANNEL_INTERVAL| Interval for checking missed messages (sec) | No       | 300           |
+| CHECK_CHANNEL_INTERVAL| Interval for periodic GetState checks (sec) | No       | 300           |
 | KEEP_ALIVE_INTERVAL   | Interval for keep-alive signals (sec)       | No       | 60            |
-| MANUAL_POLL_INTERVAL  | Interval for manual polling (sec)           | No       | 180           |
-| SESSION_DATA          | Base64 encoded session data (Heroku)        | No*      | -             |
-| LAST_PROCESSED_STATE  | Base64 encoded message state (Heroku)       | No       | -             |
-| CHANNEL_PTS_DATA      | JSON string with channel PTS values (Heroku)| No       | -             |
-| PTS_DATA_FILE         | Path to PTS data file                       | No       | session/channel_pts.json |
-| USE_ENV_PTS_STORAGE   | Force use of env vars for PTS (`true`/`false`)| No       | false         |
+| MANUAL_POLL_INTERVAL  | Interval for GetChannelDifference polling (sec) | No       | 180           |
+| TG_SESSION_STRING     | Base64 encoded Telethon session (Heroku)    | No*      | -             |
+| LAST_PROCESSED_STATE  | Base64 encoded application state (Heroku)   | No*      | -             |
 
-*Required for Heroku deployment (`SESSION_DATA`, `CHANNEL_PTS_DATA` typically provided by Heroku setup or `USE_ENV_PTS_STORAGE=true`)
+*`TG_SESSION_STRING` and `LAST_PROCESSED_STATE` are primarily for Heroku, automatically handled by `setup_heroku.sh` for initial setup. The bot will log updates needed for `LAST_PROCESSED_STATE` during operation on Heroku.
 
 ### Configuration
 
@@ -77,8 +74,10 @@ The bot is configured through environment variables set in a `.env` file or via 
     *   `SRC_CHANNEL`: The username or ID of the Telegram channel to monitor.
     *   `DST_CHANNEL`: The username or ID of the Telegram channel to post translations to.
     *   `TG_PHONE`: (Optional, for first auth) Your phone number (e.g., +1234567890). Bot will prompt if needed.
-    *   `TG_SESSION`: (Optional) Session file path. Defaults to `new_session.session` in the root. Recommended: `session/new_session` (ensure `session/` directory exists).
-    *   `TRANSLATION_STYLE`, `GENERATE_IMAGES`, `USE_STABILITY_AI`, `STABILITY_AI_API_KEY`: See comments in example `.env`.
+    *   `TG_SESSION`: (Optional) Session file name (without .session extension) used for local runs. Example: `session/my_bot_session`. The `setup_heroku.sh` script will use this to find your local session file for export.
+    *   `TRANSLATION_STYLE`, `GENERATE_IMAGES`, `USE_STABILITY_AI`, `STABILITY_AI_KEY`: See comments in example `.env`.
+    *   `TG_SESSION_STRING`: (Heroku) Contains the Base64 encoded string of your Telethon session file. Managed by `setup_heroku.sh`.
+    *   `LAST_PROCESSED_STATE`: (Heroku) Contains the Base64 encoded JSON string of the application's last known state (last message ID, timestamp, PTS). Managed by `setup_heroku.sh` and updated by the bot during operation (bot logs the new string to be updated on Heroku).
 
 ### Running the Bot
 
@@ -96,6 +95,10 @@ The bot is configured through environment variables set in a `.env` file or via 
     ```bash
     python -m app.bot
     ```
+    When the bot saves application state (e.g., after processing messages or updating PTS), if it detects it might be in a Heroku-like environment (or if `LAST_PROCESSED_STATE` is set), it will log a message like:
+    `INFO: To persist application state (e.g., on Heroku), set the 'LAST_PROCESSED_STATE' environment variable to: LAST_PROCESSED_STATE_VALUE_START###<base64_string>###LAST_PROCESSED_STATE_VALUE_END`
+    You should update the `LAST_PROCESSED_STATE` config var on Heroku with this new `<base64_string>`. The `setup_heroku.sh` script handles the initial setup.
+
     To process N recent posts instead of listening for new ones:
     ```bash
     python -m app.bot --process-recent N
@@ -126,6 +129,7 @@ The bot is designed to work seamlessly on Heroku:
    ```
    ./setup_heroku.sh your-heroku-app-name
    ```
+   This script will use `export_session.py` to read your local `TG_SESSION` file (e.g., `session/my_bot_session.session`) and your local application state file (`session/app_state.json`), then set `TG_SESSION_STRING` and `LAST_PROCESSED_STATE` on Heroku, along with other variables from your `.env` file.
 6. Deploy to Heroku using Git:
    ```
    git push heroku main
@@ -135,7 +139,7 @@ The bot is designed to work seamlessly on Heroku:
    heroku ps:scale worker=1 --app your-heroku-app-name
    ```
 
-The session and message state persistence is handled automatically, allowing the bot to maintain its state even when Heroku restarts dynos.
+The session and application state persistence is handled automatically. The bot loads state from `TG_SESSION_STRING` and `LAST_PROCESSED_STATE` on Heroku. When running on Heroku, if the bot updates its state (e.g. processes new messages, updates PTS), it will log the new `LAST_PROCESSED_STATE` string, which you should then update in your Heroku app's config vars to ensure persistence across restarts.
 
 ## Polling Mechanism
 
@@ -143,13 +147,16 @@ The bot uses a sophisticated polling mechanism to reliably receive updates from 
 
 ### How Polling Works
 
-1. **PTS (Position Token for Sequence)**: Each channel has a PTS value that represents the latest update point.
-2. **GetChannelDifferenceRequest**: The bot uses Telegram's API to request all updates since the last PTS.
-3. **Persistence**: 
-    - By default, PTS values are stored in a JSON file (defined by `PTS_DATA_FILE`, defaults to `session/channel_pts.json`).
-    - For Heroku and other ephemeral environments, PTS can be stored in the `CHANNEL_PTS_DATA` environment variable (as a JSON string). This is automatically used if `CHANNEL_PTS_DATA` is found or if `USE_ENV_PTS_STORAGE` is set to `true`.
-4. **Error Handling**: Special handling for "Persistent timestamp empty" errors during initialization.
-5. **DB Lock Prevention**: Skips polling cycles during message processing to prevent database locks.
+1. **Application State**: The bot maintains an application state that includes:
+    - `pts`: The last known PTS (Position Token for Sequence) for the source channel.
+    - `message_id`: The ID of the last successfully processed message.
+    - `timestamp`: The timestamp of the last successfully processed message.
+    - `channel_id`: The ID of the source channel being monitored.
+2. **Persistence**: This application state is managed by `app.session_manager.py`:
+    - **Local**: Saved in `session/app_state.json`.
+    - **Heroku**: Loaded from the `LAST_PROCESSED_STATE` environment variable (a Base64 encoded JSON string of the state). When the state is updated, the bot logs the new Base64 string, which should be manually updated in Heroku config vars for persistence.
+3. **GetChannelDifferenceRequest**: The bot uses Telegram's API to request all updates since the last known PTS from the application state.
+4. **State Updates**: After fetching and processing messages, or after getting a new PTS from Telegram, the bot updates its application state and saves it (locally to file, and logs the string for Heroku).
 
 ### Testing Polling
 

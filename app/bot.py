@@ -18,7 +18,7 @@ import openai
 from dotenv import load_dotenv
 from .translator import get_openai_client, translate_text
 from .image_generator import generate_image_for_post
-from .session_manager import setup_session, get_last_processed_state, save_last_processed_state, update_pts_value
+from .session_manager import setup_session, load_app_state, save_app_state
 from telethon.tl.functions.account import UpdateStatusRequest
 from telethon.tl.functions.updates import GetChannelDifferenceRequest
 from telethon.tl.types import InputChannel, ChannelMessagesFilterEmpty
@@ -26,7 +26,7 @@ from telethon.errors import SessionPasswordNeededError
 from datetime import datetime, timedelta
 import random
 import argparse
-from .pts_manager import load_pts, save_pts
+from .pts_manager import get_pts, update_pts
 
 # Load environment variables explicitly from project root
 dotenv_path = Path(__file__).resolve().parent.parent / '.env'
@@ -167,18 +167,20 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
         logger.info(f"Posted right-bidlo version")
         
         # Store the message ID and timestamp for recovery after restarts
-        if message_id is not None:
-            # Get message date if available
-            try:
-                message = await client_instance.get_messages(SRC_CHANNEL, ids=message_id)
-                if message and hasattr(message, 'date'):
-                    save_last_processed_state(message_id, message.date)
-                    logger.debug(f"Updated last processed state with message ID {message_id}")
-                else:
-                    save_last_processed_state(message_id, datetime.now())
-            except Exception as e:
-                logger.warning(f"Could not get message date for ID {message_id}: {e}")
-                save_last_processed_state(message_id, datetime.now())
+        # This responsibility is moved to the caller (e.g., poll_big_channel or handle_new_message)
+        # if message_id is not None:
+        #     try:
+        #         message = await client_instance.get_messages(SRC_CHANNEL, ids=message_id)
+        #         if message and hasattr(message, 'date'):
+        #             # OLD: save_last_processed_state(message_id, message.date)
+        #             pass # State saving handled by caller
+        #         else:
+        #             # OLD: save_last_processed_state(message_id, datetime.now())
+        #             pass # State saving handled by caller
+        #     except Exception as e:
+        #         logger.warning(f"Could not get message date for ID {message_id}: {e}")
+        #         # OLD: save_last_processed_state(message_id, datetime.now())
+        #         pass # State saving handled by caller
         
         logger.info(f"Total processing time for message: {time.time() - start_time:.2f} seconds")
         return True
@@ -193,8 +195,16 @@ async def setup_event_handlers(client_instance):
         try:
             txt = event.message.message
             if not txt: return
-            logger.info(f"Processing new message: {txt[:50]}...")
-            await translate_and_post(client_instance, txt, event.message.id)
+            logger.info(f"Processing new message ID {event.message.id}: {txt[:50]}...")
+            success = await translate_and_post(client_instance, txt, event.message.id)
+            if success:
+                current_state = load_app_state()
+                current_state['message_id'] = event.message.id
+                current_state['timestamp'] = event.message.date.isoformat() # Ensure ISO format
+                # PTS is not directly available here, rely on GetChannelDifference for PTS updates
+                # If this handler is primary, might need a way to estimate or fetch PTS if critical
+                save_app_state(current_state)
+                logger.info(f"App state updated after processing new message ID {event.message.id}")
         except Exception as e:
             logger.error(f"Error in handle_new_message: {str(e)}", exc_info=True)
 
@@ -403,7 +413,7 @@ async def background_channel_poller(client):
             input_channel = InputChannel(channel_id=channel.id, access_hash=channel.access_hash)
             
             # Get stored pts value or use 0 for first run
-            state = get_last_processed_state()
+            state = load_app_state()
             pts = state.get("pts", 0)
             
             # Get channel difference (manual poll for updates)
@@ -420,7 +430,7 @@ async def background_channel_poller(client):
                 
                 # Update pts value if available
                 if hasattr(diff, 'pts'):
-                    update_pts_value(diff.pts)
+                    update_pts(diff.pts)
                     logger.debug(f"Updated pts value to {diff.pts}")
                 
                 # Process any new messages found
@@ -453,161 +463,189 @@ async def background_channel_poller(client):
 
 async def poll_big_channel(client, channel_username):
     """
-    Correctly poll a large "megachannel" using updates.getChannelDifference
-    to receive updates even when Telegram stops pushing them.
-    
-    Args:
-        client: The Telegram client instance
-        channel_username: The channel username to poll (e.g. 'nytimes')
+    Reliably polls a large channel for new messages using GetChannelDifference.
+    Uses PTS (Points) to keep track of the current position in the update stream.
+    Processes new messages found and updates PTS.
     """
-    logger.info(f"Starting proper megachannel polling for {channel_username}")
+    logger.info(f"Starting to poll channel: {channel_username}")
     
-    # Track if this is the first poll of the channel
-    first_poll = True
+    try:
+        entity = await client.get_entity(channel_username)
+        input_channel = InputChannel(channel_id=entity.id, access_hash=entity.access_hash)
+        logger.info(f"Successfully resolved channel: {channel_username} to ID: {entity.id}")
 
-    # Handle the potential db lock issue with a boolean flag
-    processing_message = False
-    
-    while True:
-        try:
-            # Skip polling if we're currently processing a message to avoid db locks
-            if processing_message:
-                logger.debug("Skipping poll cycle while processing a message")
-                await asyncio.sleep(5)  # Short sleep before checking again
-                continue
-                
-            # Get channel entity
-            channel = await client.get_entity(channel_username)
-            
-            # Create input channel
-            input_channel = InputChannel(channel_id=channel.id, access_hash=channel.access_hash)
-            
-            # Get stored pts value from our new pts_manager
-            pts = load_pts(channel_username)
-
-            # For first poll, handle pts differently 
-            if first_poll and pts == 0:
-                # Get latest message to make sure we don't re-process history
-                messages = await client.get_messages(channel_username, limit=1)
-                if messages and len(messages) > 0:
-                    # Process the message directly
-                    latest_msg = messages[0]
-                    if hasattr(latest_msg, 'message') and latest_msg.message:
-                        logger.info(f"First poll: Processing latest message directly: {latest_msg.id}")
-                        processing_message = True
-                        try:
-                            await translate_and_post(client, latest_msg.message, latest_msg.id)
-                        finally:
-                            processing_message = False
-                    
-                    # Try to get the pts value from the dialog
-                    dialog = await client.get_entity(channel_username)
-                    if hasattr(dialog, 'pts'):
-                        pts = dialog.pts
-                        logger.info(f"First poll: Using pts={pts} from dialog entity")
-                        save_pts(channel_username, pts)
-                
-                # Mark first poll as done
-                first_poll = False
-                # Sleep before first real poll
-                await asyncio.sleep(10)
-                continue
-
-            logger.info(f"Polling channel {channel_username} with pts={pts}")
-            
-            # Keep fetching differences until we get a final=True response
-            while True:
-                try:
-                    diff = await client(GetChannelDifferenceRequest(
-                        channel=input_channel,
-                        filter=ChannelMessagesFilterEmpty(),
-                        pts=pts,
-                        limit=100
-                    ))
-                    
-                    # Get the correct PTS value
-                    pts = diff.pts if hasattr(diff, "pts") else diff.state.pts
-                    logger.debug(f"Updated pts value to {pts}")
-                    
-                    # Save the pts for this channel
-                    save_pts(channel_username, pts)
-                    
-                    # Process new messages
-                    msg_count = len(getattr(diff, 'new_messages', []))
-                    if msg_count > 0:
-                        logger.info(f"Channel polling: received {msg_count} new messages")
-                        
-                        for new_msg in diff.new_messages:
-                            if hasattr(new_msg, 'message') and new_msg.message:
-                                logger.info(f"Processing message from poll: {new_msg.id}")
-                                processing_message = True
-                                try:
-                                    await translate_and_post(client, new_msg.message, new_msg.id)
-                                finally:
-                                    processing_message = False
-                    
-                    # If this is a final update, break out of the inner loop
-                    if getattr(diff, 'final', False):
-                        logger.debug(f"Received final=True, updates complete")
-                        break
-                    
-                except Exception as e:
-                    err_str = str(e)
-                    if "Persistent timestamp empty" in err_str:
-                        # This is normal for first call or after a long time
-                        logger.info("Channel needs initialization. Getting fresh pts value.")
-                        
-                        # Get channel state to get a fresh pts value
-                        try:
-                            # Get a latest message to establish a baseline timestamp
-                            messages = await client.get_messages(channel_username, limit=1)
-                            if messages and len(messages) > 0:
-                                # Process the message directly
-                                latest_msg = messages[0]
-                                if hasattr(latest_msg, 'message') and latest_msg.message:
-                                    logger.info(f"Processing latest message directly: {latest_msg.id}")
-                                    processing_message = True
-                                    try:
-                                        await translate_and_post(client, latest_msg.message, latest_msg.id)
-                                    finally:
-                                        processing_message = False
-                                
-                                # Try to get the pts value from the dialog
-                                dialog = await client.get_entity(channel_username)
-                                if hasattr(dialog, 'pts'):
-                                    pts = dialog.pts
-                                    logger.info(f"Using pts={pts} from dialog entity")
-                                    save_pts(channel_username, pts)
-                        except Exception as get_pts_err:
-                            logger.error(f"Error getting fresh pts: {get_pts_err}")
-                            
-                        # Sleep longer before next attempt to avoid spamming
-                        await asyncio.sleep(60)
-                        break
-                    else:
-                        # This is an actual error
-                        logger.error(f"Error in poll_big_channel inner loop: {e}")
-                        break
-            
+        # Load initial PTS from global app state
+        current_app_state = load_app_state()
+        last_pts = current_app_state.get('pts', 0)
+        if last_pts == 0:
+            logger.info(f"No previous PTS found for channel {entity.id}, starting from latest state.")
+            # Get current PTS state if starting from scratch
             try:
-                # Use diff.timeout if available, otherwise default to 30 seconds
-                sleep_seconds = getattr(diff, 'timeout', 30) if 'diff' in locals() else 30
-                logger.debug(f"Sleeping for {sleep_seconds} seconds before next poll")
-                await asyncio.sleep(sleep_seconds)
+                # Attempt to get current state to initialize PTS correctly
+                # This is a common pattern to get the initial PTS for a channel.
+                # We fetch no messages (limit=0) just to get the current pts from the state.
+                initial_diff = await client(GetChannelDifferenceRequest(
+                    channel=input_channel,
+                    filter=ChannelMessagesFilterEmpty(), # No specific filter, just want state
+                    pts=1, # Smallest possible PTS to ensure we get current state
+                    limit=0 # Don't need messages, just the state object for its PTS
+                ))
+                if hasattr(initial_diff, 'pts'):
+                    last_pts = initial_diff.pts
+                    current_app_state['pts'] = last_pts
+                    current_app_state['channel_id'] = entity.id # Store channel ID if not already there
+                    save_app_state(current_app_state)
+                    logger.info(f"Initialized PTS for channel {entity.id} to {last_pts}.")
+                elif hasattr(initial_diff, 'new_messages') and not initial_diff.new_messages and hasattr(initial_diff, 'final') and initial_diff.final:
+                    # This might be a ChannelDifferenceEmpty, meaning we are up to date, PTS is in other_updates or not needed.
+                    # Or it could be ChannelDifferenceTooLong. If too long, we need to fetch initial messages.
+                    logger.info("Initial GetChannelDifference returned empty or final state. Assuming up-to-date or will catch up.")
+                    # If it was ChannelDifferenceTooLong, the next loop iteration will handle it.
+                    # For safety, ensure last_pts is not 0 if we can find a message
+                    async for m in client.iter_messages(input_channel, limit=1):
+                        if m and hasattr(m, 'pts'): 
+                            last_pts = m.pts 
+                            current_app_state['pts'] = last_pts
+                            save_app_state(current_app_state)
+                            logger.info(f"Set initial PTS from latest message: {last_pts}")
+                        break # only need one
+                    if last_pts == 0: # if channel is empty or no pts on message
+                        last_pts = 1 # Start with 1 if truly nothing found
+                        logger.warning("Could not determine initial PTS, starting with 1. This might re-process if channel is very old & empty.")
+
             except Exception as e:
-                logger.error(f"Error calculating sleep time: {e}")
-                await asyncio.sleep(30)  # Default fallback
+                logger.error(f"Error getting initial PTS for {channel_username}: {e}. Will use last known PTS or 0.")
+        
+        logger.info(f"Initial PTS for channel {entity.id}: {last_pts}")
+
+    except ValueError as e:
+        logger.error(f"Channel {channel_username} not found or invalid: {e}")
+        return
+    except Exception as e:
+        logger.error(f"Error setting up poller for {channel_username}: {e}", exc_info=True)
+        return
+
+    max_retries = 5
+    retry_delay = 10  # seconds
+
+    while True:
+        retries = 0
+        processed_messages_in_cycle = 0
+        try:
+            logger.debug(f"Polling {channel_username} (ID: {entity.id}) with PTS: {last_pts}")
             
+            # Get updates (difference) since the last PTS
+            # Limit can be adjusted; 100 is a common default.
+            difference = await client(GetChannelDifferenceRequest(
+                channel=input_channel,
+                filter=ChannelMessagesFilterEmpty(), # No specific filter, interested in all new messages
+                pts=last_pts,
+                limit=100  # Max messages to fetch per request
+            ))
+
+            # Process the difference object
+            if hasattr(difference, 'new_messages') and difference.new_messages:
+                logger.info(f"Found {len(difference.new_messages)} new messages in {channel_username}.")
+                # Sort messages by date/ID to process in order
+                sorted_messages = sorted(difference.new_messages, key=lambda m: (m.date, m.id))
+                
+                for message in sorted_messages:
+                    if not hasattr(message, 'message') or not message.message: # Skip non-text or empty messages
+                        if hasattr(message, 'pts') and message.pts:
+                            last_pts = message.pts # Update PTS even for skipped messages
+                        continue
+
+                    txt_to_process = message.message
+                    logger.info(f"Processing message ID {message.id} from {channel_username}: {txt_to_process[:50]}...")
+                    
+                    success = await translate_and_post(client, txt_to_process, message.id, DST_CHANNEL)
+                    if success:
+                        processed_messages_in_cycle += 1
+                        current_app_state = load_app_state() # Reload state before updating
+                        current_app_state['message_id'] = message.id
+                        current_app_state['timestamp'] = message.date.isoformat()
+                        if hasattr(message, 'pts') and message.pts: # Update PTS from message if available
+                            last_pts = message.pts 
+                            current_app_state['pts'] = last_pts
+                        # Also update channel_id if it's missing, though it should be set by now
+                        if 'channel_id' not in current_app_state or not current_app_state['channel_id']:
+                            current_app_state['channel_id'] = entity.id
+                        save_app_state(current_app_state)
+                        logger.info(f"App state updated. Last processed ID: {message.id}, New PTS for {entity.id}: {last_pts}")
+                    else:
+                        logger.warning(f"Failed to process message ID {message.id} from {channel_username}. It might be retried if PTS doesn't advance.")
+                        # If processing fails, we might not want to advance PTS past this message
+                        # or implement a more robust retry/skip mechanism.
+                        # For now, PTS will be updated from the GetChannelDifference result's PTS later.
+
+            # Update PTS from the difference object itself (this is the most reliable PTS)
+            if hasattr(difference, 'pts'):
+                if difference.pts > last_pts:
+                    logger.info(f"Updating PTS for channel {entity.id} from {last_pts} to {difference.pts} (from GetChannelDifference response)")
+                    last_pts = difference.pts
+                    # Save the new PTS immediately
+                    current_app_state = load_app_state()
+                    current_app_state['pts'] = last_pts
+                    current_app_state['channel_id'] = entity.id # Ensure channel_id is also persisted with PTS
+                    save_app_state(current_app_state)
+                elif difference.pts < last_pts:
+                    logger.warning(f"PTS from GetChannelDifference ({difference.pts}) is less than current PTS ({last_pts}). This should not happen. Not updating PTS.")
+            elif hasattr(difference, 'intermediate_state') and hasattr(difference.intermediate_state, 'pts'): # For ChannelDifference
+                 if difference.intermediate_state.pts > last_pts:
+                    logger.info(f"Updating PTS for channel {entity.id} from {last_pts} to {difference.intermediate_state.pts} (from ChannelDifference intermediate_state)")
+                    last_pts = difference.intermediate_state.pts
+                    current_app_state = load_app_state()
+                    current_app_state['pts'] = last_pts
+                    current_app_state['channel_id'] = entity.id
+                    save_app_state(current_app_state)
+            # No new messages and PTS is the same means we are up to date for this slice
+            elif not hasattr(difference, 'new_messages') or not difference.new_messages:
+                logger.debug(f"No new messages in {channel_username} for PTS {last_pts}.")
+            
+            # Handle ChannelDifferenceTooLong: we need to fetch messages iteratively
+            # This basic poller might not fully handle ChannelDifferenceTooLong if it means there are more than 'limit' messages
+            # A robust solution for TooLong might involve fetching messages until caught up before relying on GetChannelDifference again.
+            # However, Telethon's GetChannelDifference is meant to handle this by returning a state from which to continue.
+            # If difference.final is False and there are other_updates, it means there's more to fetch.
+            if hasattr(difference, 'final') and not difference.final and (hasattr(difference, 'other_updates') and difference.other_updates):
+                 logger.info(f"More updates available for {channel_username} (final=false). Continuing polling immediately.")
+                 # No sleep, continue to fetch next batch
+                 continue 
+
+            if processed_messages_in_cycle == 0:
+                 logger.debug(f"No messages processed in this cycle for {channel_username}.")
+            
+            # Wait before the next poll
+            await asyncio.sleep(MANUAL_POLL_INTERVAL) 
+            retries = 0 # Reset retries on successful poll
+
+        except ConnectionError as e:
+            retries += 1
+            logger.error(f"Connection error polling {channel_username} (attempt {retries}/{max_retries}): {e}")
+            if retries >= max_retries:
+                logger.error(f"Max retries reached for {channel_username}. Stopping polling for this channel.")
+                # Consider a mechanism to restart the bot or this specific task after a longer delay
+                # For now, this task will exit.
+                break 
+            logger.info(f"Retrying in {retry_delay} seconds...")
+            await asyncio.sleep(retry_delay)
+            # Attempt to reconnect before next retry
+            if not client.is_connected():
+                try:
+                    logger.info("Attempting to reconnect client...")
+                    await client.connect()
+                    if await client.is_connected():
+                        logger.info("Client reconnected successfully.")
+                    else:
+                        logger.error("Failed to reconnect client.")
+                        # If reconnect fails, it might be better to let the main loop handle this or exit.
+                except Exception as ce:
+                    logger.error(f"Exception during reconnection attempt: {ce}")
+        
         except Exception as e:
-            logger.error(f"Error in poll_big_channel: {e}")
-            
-            # Check for "database is locked" errors and handle them
-            if "database is locked" in str(e):
-                logger.warning("Database lock detected, sleeping longer to allow locks to clear")
-                await asyncio.sleep(120)  # Longer sleep on database locks
-            else:
-                # Regular error, sleep before retry
-                await asyncio.sleep(60)  # Sleep on error before retry
+            logger.error(f"An unexpected error occurred in poll_big_channel for {channel_username}: {e}", exc_info=True)
+            # General error, wait and retry
+            await asyncio.sleep(MANUAL_POLL_INTERVAL * 2) # Longer delay for unexpected errors
 
 async def main():
     """Main function to run the bot"""
@@ -748,7 +786,7 @@ async def main():
     
     # Check for missed messages during downtime
     try:
-        state = get_last_processed_state()
+        state = load_app_state()
         if state and state.get("message_id", 0) > 0:
             logger.info(f"Checking for missed messages since last processed message ID: {state.get('message_id')}")
             

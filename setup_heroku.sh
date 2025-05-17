@@ -40,8 +40,7 @@ if [ ! -f "${ACTUAL_SESSION_PATH}.session" ]; then
 fi
 
 # Export session and other state data to base64
-echo "Exporting data from ${ACTUAL_SESSION_PATH}.session and PTS file..."
-# The export_session.py script now prints each variable on a new line with a clear key
+echo "Exporting Telethon session string and application state..."
 EXPORT_OUTPUT=$(python3 export_session.py "$ACTUAL_SESSION_PATH")
 
 if [[ $EXPORT_OUTPUT == *"Error:"* ]]; then
@@ -50,38 +49,26 @@ if [[ $EXPORT_OUTPUT == *"Error:"* ]]; then
   exit 1
 fi
 
-# Extract data using grep and cut from the new output format
-# Assuming output like: 
-# Session data (SESSION_DATA): base64stuff...
-# Initial last processed state (LAST_PROCESSED_STATE): base64stuff...
-# Channel PTS data (CHANNEL_PTS_DATA): base64stuff...
-
-SESSION_DATA_LINE=$(echo "$EXPORT_OUTPUT" | grep "Session data (SESSION_DATA):")
-LAST_PROCESSED_STATE_LINE=$(echo "$EXPORT_OUTPUT" | grep "Initial last processed state (LAST_PROCESSED_STATE):")
-CHANNEL_PTS_DATA_LINE=$(echo "$EXPORT_OUTPUT" | grep "Channel PTS data (CHANNEL_PTS_DATA):")
-
+# Extract the line containing the heroku config:set command suggestion
 HEROKU_COMMAND_LINE=$(echo "$EXPORT_OUTPUT" | grep "heroku config:set")
 
-SESSION_DATA=$(echo "$SESSION_DATA_LINE" | sed 's/Session data (SESSION_DATA): //' | sed 's/\.\.\.$//')
-LAST_PROCESSED_STATE=$(echo "$LAST_PROCESSED_STATE_LINE" | sed 's/Initial last processed state (LAST_PROCESSED_STATE): //' | sed 's/\.\.\.$//')
-CHANNEL_PTS_DATA=$(echo "$CHANNEL_PTS_DATA_LINE" | sed 's/Channel PTS data (CHANNEL_PTS_DATA): //' | sed 's/\.\.\.$//')
-
-# If sed couldn't remove ..., it means the string was short, so use the full value from the command line
-# This is a bit fragile; ideally export_session.py would output raw values for easier parsing.
-# For now, we will use the direct values from the heroku command line that script suggests.
-
-CONFIG_VARS_TO_SET=$(echo "$HEROKU_COMMAND_LINE" | sed "s/heroku config:set //" | sed "s/ --app YOUR_APP_NAME//")
+# Extract only the 'KEY="VALUE" KEY2="VALUE2"' part
+CONFIG_VARS_TO_SET=$(echo "$HEROKU_COMMAND_LINE" | sed -e "s/heroku config:set //" -e "s/ --app YOUR_APP_NAME//")
 
 if [ -z "$CONFIG_VARS_TO_SET" ]; then
   echo "Error: Failed to extract necessary data from export_session.py output."
-  echo "Full output:"
+  echo "Full output from export_session.py:"
   echo "$EXPORT_OUTPUT"
   exit 1
 fi
 
-# Set Heroku config vars from .env file (excluding TG_SESSION, SESSION_DATA, etc.)
+echo "Variables to set from export_session.py: $CONFIG_VARS_TO_SET"
+
+# Set Heroku config vars from .env file (excluding TG_SESSION and others managed by export_session.py)
 echo "Setting general environment variables from $ENV_FILE on Heroku app: $APP_NAME"
-EXCLUDED_VARS="^(TG_SESSION|SESSION_DATA|LAST_PROCESSED_STATE|CHANNEL_PTS_DATA|USE_ENV_PTS_STORAGE)=.*"
+# Exclude TG_SESSION (session name for local client), TG_SESSION_STRING (actual session content),
+# and LAST_PROCESSED_STATE (app state). These are handled by export_session.py output.
+EXCLUDED_VARS="^(TG_SESSION|TG_SESSION_STRING|LAST_PROCESSED_STATE)=.*"
 
 while IFS= read -r line || [[ -n "$line" ]]; do
   # Skip empty lines, comments, and excluded vars
@@ -93,13 +80,27 @@ while IFS= read -r line || [[ -n "$line" ]]; do
   heroku config:set "$line" --app "$APP_NAME"
 done < "$ENV_FILE"
 
-# Set the crucial exported data
-echo "Setting exported data (SESSION_DATA, LAST_PROCESSED_STATE, CHANNEL_PTS_DATA)..."
-# The CONFIG_VARS_TO_SET already contains the key=value pairs format
+# Set the crucial exported data (TG_SESSION_STRING and LAST_PROCESSED_STATE)
+echo "Setting exported Telethon session string and application state..."
 heroku config:set $CONFIG_VARS_TO_SET --app "$APP_NAME"
 
-# Explicitly set USE_ENV_PTS_STORAGE to true for Heroku
-echo "Setting USE_ENV_PTS_STORAGE=true..."
-heroku config:set USE_ENV_PTS_STORAGE=true --app "$APP_NAME"
+# Remove obsolete variables if they exist on Heroku
+# Check if CHANNEL_PTS_DATA is set and unset it
+if heroku config:get CHANNEL_PTS_DATA --app "$APP_NAME" >/dev/null 2>&1; then
+  echo "Unsetting obsolete CHANNEL_PTS_DATA variable..."
+  heroku config:unset CHANNEL_PTS_DATA --app "$APP_NAME"
+fi
+
+# Check if USE_ENV_PTS_STORAGE is set and unset it
+if heroku config:get USE_ENV_PTS_STORAGE --app "$APP_NAME" >/dev/null 2>&1; then
+  echo "Unsetting obsolete USE_ENV_PTS_STORAGE variable..."
+  heroku config:unset USE_ENV_PTS_STORAGE --app "$APP_NAME"
+fi
+
+# Check if old SESSION_DATA is set and unset it (replaced by TG_SESSION_STRING)
+if heroku config:get SESSION_DATA --app "$APP_NAME" >/dev/null 2>&1; then
+  echo "Unsetting obsolete SESSION_DATA variable (replaced by TG_SESSION_STRING)..."
+  heroku config:unset SESSION_DATA --app "$APP_NAME"
+fi
 
 echo "Done! Heroku environment is now configured for app: $APP_NAME" 
