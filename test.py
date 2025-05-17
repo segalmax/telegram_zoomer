@@ -92,6 +92,11 @@ TEST_DST_CHANNEL = os.getenv('TEST_DST_CHANNEL')
 # Persistent test session file
 PERSISTENT_TEST_SESSION = "session/test_session_persistent"
 
+# Create an environment variable alias for SRC_CHANNEL because the bot uses that directly
+# and we need to ensure it's set correctly during tests
+os.environ['TEST_SRC_CHANNEL'] = os.getenv('TEST_SRC_CHANNEL', '')
+os.environ['TEST_DST_CHANNEL'] = os.getenv('TEST_DST_CHANNEL', '')
+
 # Ephemeral storage for Heroku - store PTS in environment variable
 def save_heroku_pts(channel_username, pts):
     """Store PTS in environment variable for Heroku's ephemeral filesystem"""
@@ -490,6 +495,9 @@ async def main():
         # Set the environment variables for the test
         os.environ['SRC_CHANNEL'] = TEST_SRC_CHANNEL
         os.environ['DST_CHANNEL'] = TEST_DST_CHANNEL
+        
+        # Set TEST_MODE to true
+        os.environ['TEST_MODE'] = 'true'
         
         # Patch PTS storage for Heroku compatibility
         patch_pts_functions_for_heroku()

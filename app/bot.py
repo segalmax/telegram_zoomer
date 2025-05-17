@@ -51,6 +51,20 @@ KEEP_ALIVE_INTERVAL = int(os.getenv('KEEP_ALIVE_INTERVAL', '60'))  # Keep connec
 MANUAL_POLL_INTERVAL = int(os.getenv('MANUAL_POLL_INTERVAL', '180'))  # Manual polling every 3 minutes
 USE_STABILITY_AI = os.getenv('USE_STABILITY_AI', 'false').lower() == 'true'
 
+# Check for TEST_SRC_CHANNEL and TEST_DST_CHANNEL environment variables
+# This helps us switch to test mode when running tests
+TEST_MODE = False
+if os.getenv('TEST_MODE', 'false').lower() == 'true':
+    TEST_MODE = True
+    logger.info("Running in TEST MODE")
+    # Use test channels if they are defined
+    if os.getenv('TEST_SRC_CHANNEL'):
+        SRC_CHANNEL = os.getenv('TEST_SRC_CHANNEL')
+        logger.info(f"Using TEST source channel: {SRC_CHANNEL}")
+    if os.getenv('TEST_DST_CHANNEL'):
+        DST_CHANNEL = os.getenv('TEST_DST_CHANNEL')
+        logger.info(f"Using TEST destination channel: {DST_CHANNEL}")
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -448,8 +462,20 @@ async def poll_big_channel(client, channel_username):
     """
     logger.info(f"Starting proper megachannel polling for {channel_username}")
     
+    # Track if this is the first poll of the channel
+    first_poll = True
+
+    # Handle the potential db lock issue with a boolean flag
+    processing_message = False
+    
     while True:
         try:
+            # Skip polling if we're currently processing a message to avoid db locks
+            if processing_message:
+                logger.debug("Skipping poll cycle while processing a message")
+                await asyncio.sleep(5)  # Short sleep before checking again
+                continue
+                
             # Get channel entity
             channel = await client.get_entity(channel_username)
             
@@ -458,6 +484,35 @@ async def poll_big_channel(client, channel_username):
             
             # Get stored pts value from our new pts_manager
             pts = load_pts(channel_username)
+
+            # For first poll, handle pts differently 
+            if first_poll and pts == 0:
+                # Get latest message to make sure we don't re-process history
+                messages = await client.get_messages(channel_username, limit=1)
+                if messages and len(messages) > 0:
+                    # Process the message directly
+                    latest_msg = messages[0]
+                    if hasattr(latest_msg, 'message') and latest_msg.message:
+                        logger.info(f"First poll: Processing latest message directly: {latest_msg.id}")
+                        processing_message = True
+                        try:
+                            await translate_and_post(client, latest_msg.message, latest_msg.id)
+                        finally:
+                            processing_message = False
+                    
+                    # Try to get the pts value from the dialog
+                    dialog = await client.get_entity(channel_username)
+                    if hasattr(dialog, 'pts'):
+                        pts = dialog.pts
+                        logger.info(f"First poll: Using pts={pts} from dialog entity")
+                        save_pts(channel_username, pts)
+                
+                # Mark first poll as done
+                first_poll = False
+                # Sleep before first real poll
+                await asyncio.sleep(10)
+                continue
+
             logger.info(f"Polling channel {channel_username} with pts={pts}")
             
             # Keep fetching differences until we get a final=True response
@@ -485,7 +540,11 @@ async def poll_big_channel(client, channel_username):
                         for new_msg in diff.new_messages:
                             if hasattr(new_msg, 'message') and new_msg.message:
                                 logger.info(f"Processing message from poll: {new_msg.id}")
-                                await translate_and_post(client, new_msg.message, new_msg.id)
+                                processing_message = True
+                                try:
+                                    await translate_and_post(client, new_msg.message, new_msg.id)
+                                finally:
+                                    processing_message = False
                     
                     # If this is a final update, break out of the inner loop
                     if getattr(diff, 'final', False):
@@ -507,7 +566,11 @@ async def poll_big_channel(client, channel_username):
                                 latest_msg = messages[0]
                                 if hasattr(latest_msg, 'message') and latest_msg.message:
                                     logger.info(f"Processing latest message directly: {latest_msg.id}")
-                                    await translate_and_post(client, latest_msg.message, latest_msg.id)
+                                    processing_message = True
+                                    try:
+                                        await translate_and_post(client, latest_msg.message, latest_msg.id)
+                                    finally:
+                                        processing_message = False
                                 
                                 # Try to get the pts value from the dialog
                                 dialog = await client.get_entity(channel_username)
@@ -526,7 +589,6 @@ async def poll_big_channel(client, channel_username):
                         logger.error(f"Error in poll_big_channel inner loop: {e}")
                         break
             
-            # Get the timeout value or default to 30 seconds
             try:
                 # Use diff.timeout if available, otherwise default to 30 seconds
                 sleep_seconds = getattr(diff, 'timeout', 30) if 'diff' in locals() else 30
@@ -538,7 +600,14 @@ async def poll_big_channel(client, channel_username):
             
         except Exception as e:
             logger.error(f"Error in poll_big_channel: {e}")
-            await asyncio.sleep(60)  # Sleep on error before retry
+            
+            # Check for "database is locked" errors and handle them
+            if "database is locked" in str(e):
+                logger.warning("Database lock detected, sleeping longer to allow locks to clear")
+                await asyncio.sleep(120)  # Longer sleep on database locks
+            else:
+                # Regular error, sleep before retry
+                await asyncio.sleep(60)  # Sleep on error before retry
 
 async def main():
     """Main function to run the bot"""

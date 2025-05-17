@@ -13,7 +13,10 @@
 set -e
 
 echo "🚀 Starting Telegram Bot in test mode (background)..."
-python test.py --bot-mode --no-images > bot_test.log 2>&1 &
+# Set environment variables and run the bot in test mode
+export GENERATE_IMAGES=false
+export TEST_MODE=true
+python test.py --bot-mode > bot_test.log 2>&1 &
 BOT_PID=$!
 
 echo "⏳ Waiting 10 seconds for bot to initialize..."
