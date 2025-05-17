@@ -12,6 +12,7 @@ import logging
 import json
 from pathlib import Path
 from datetime import datetime, timedelta
+import gzip # Added for decompression
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,7 @@ def load_app_state():
     1. LAST_PROCESSED_STATE environment variable (Base64 encoded JSON).
     2. Local APP_STATE_FILE (session/app_state.json, raw JSON).
     3. Default state (look back 5 minutes).
-
+    
     Returns:
         dict: The application state.
     """
@@ -79,7 +80,7 @@ def load_app_state():
             
     # Ensure pts is an int
     state_data["pts"] = int(state_data.get("pts", 0))
-
+    
     return state_data
 
 def save_app_state(state_data):
@@ -88,7 +89,7 @@ def save_app_state(state_data):
     - Writes to local APP_STATE_FILE (session/app_state.json) as raw JSON.
     - Logs a Base64 encoded JSON string for the user to set as
       the LAST_PROCESSED_STATE environment variable on Heroku.
-
+    
     Args:
         state_data (dict): The application state to save. 
                            Timestamp should be a datetime object or ISO string.
@@ -139,38 +140,63 @@ def update_pts_in_state(pts_value):
     save_app_state(current_state)
     logger.debug(f"PTS value updated to {pts_value} in app state.")
 
-# Keep setup_session for Telethon's own session file, but ensure consistency in env var naming
 # Standardize to TG_SESSION_STRING for the base64 encoded .session file
-TELETHON_SESSION_ENV_VAR = 'TG_SESSION_STRING' # Changed from SESSION_DATA
+# AND TG_COMPRESSED_SESSION_STRING for the gzipped base64 version.
+# The compressed version takes precedence.
+TELETHON_SESSION_ENV_VAR = 'TG_SESSION_STRING' 
+COMPRESSED_TELETHON_SESSION_ENV_VAR = 'TG_COMPRESSED_SESSION_STRING'
 
 def setup_session():
     """
     Set up the Telethon session file from environment variable if available.
-    This checks for TG_SESSION_STRING environment variable and creates
-    the .session file if available.
+    Checks for TG_COMPRESSED_SESSION_STRING first, then TG_SESSION_STRING.
+    Decompresses if using the compressed version.
     
     Returns:
         str: The path to the session name (without .session extension)
     """
     session_name = os.environ.get('TG_SESSION', 'session/default_persistent_bot_session')
+    session_file_path = Path(f"{session_name}.session")
     
     session_dir = Path(session_name).parent
     session_dir.mkdir(parents=True, exist_ok=True)
     
+    compressed_session_string = os.environ.get(COMPRESSED_TELETHON_SESSION_ENV_VAR)
     telethon_session_string = os.environ.get(TELETHON_SESSION_ENV_VAR)
-    if telethon_session_string:
+
+    session_data_to_write = None
+    source_env_var = None
+
+    if compressed_session_string:
+        logger.info(f"Found '{COMPRESSED_TELETHON_SESSION_ENV_VAR}'. Will attempt to decompress and use it.")
         try:
-            decoded_data = base64.b64decode(telethon_session_string)
-            
-            session_file_path = Path(f"{session_name}.session")
-            logger.info(f"Creating Telethon session file at {session_file_path} from '{TELETHON_SESSION_ENV_VAR}' environment variable.")
+            decoded_data = base64.b64decode(compressed_session_string)
+            session_data_to_write = gzip.decompress(decoded_data)
+            source_env_var = COMPRESSED_TELETHON_SESSION_ENV_VAR
+            logger.info(f"Successfully decompressed session data from '{source_env_var}'. Original size: {len(decoded_data)}, Decompressed size: {len(session_data_to_write)}")
+        except Exception as e:
+            logger.error(f"Failed to decompress session file from {COMPRESSED_TELETHON_SESSION_ENV_VAR}: {str(e)}. Will check for uncompressed version.")
+            session_data_to_write = None # Fallback
+    
+    if not session_data_to_write and telethon_session_string:
+        logger.info(f"Using uncompressed '{TELETHON_SESSION_ENV_VAR}'.")
+        try:
+            session_data_to_write = base64.b64decode(telethon_session_string)
+            source_env_var = TELETHON_SESSION_ENV_VAR
+        except Exception as e:
+            logger.error(f"Failed to decode session file from {TELETHON_SESSION_ENV_VAR}: {str(e)}")
+            session_data_to_write = None
+
+    if session_data_to_write:
+        try:
+            logger.info(f"Creating Telethon session file at {session_file_path} from '{source_env_var}' environment variable.")
             with open(session_file_path, 'wb') as f:
-                f.write(decoded_data)
+                f.write(session_data_to_write)
             logger.info(f"Telethon session file {session_file_path} created successfully.")
         except Exception as e:
-            logger.error(f"Failed to create Telethon session file from {TELETHON_SESSION_ENV_VAR}: {str(e)}")
+            logger.error(f"Failed to write Telethon session file from {source_env_var}: {str(e)}")
     else:
-        logger.info(f"No '{TELETHON_SESSION_ENV_VAR}' found in environment. "
+        logger.info(f"No session string found in '{COMPRESSED_TELETHON_SESSION_ENV_VAR}' or '{TELETHON_SESSION_ENV_VAR}'. "
                     f"Telethon will use/create '{session_name}.session' locally or prompt for auth if it doesn't exist.")
     
     return session_name # Return the base name for Telethon client

@@ -28,12 +28,20 @@ import random
 import argparse
 from .pts_manager import get_pts, update_pts
 
-# Load environment variables explicitly from project root
-dotenv_path = Path(__file__).resolve().parent.parent / '.env'
-if dotenv_path.exists():
-    load_dotenv(dotenv_path=dotenv_path)
-else:
-    print(f"Warning: .env file not found at {dotenv_path}", file=sys.stderr)
+# Load environment variables explicitly from project root.
+# Order of loading determines precedence for non-secret variables if keys overlap.
+# 1. app_settings.env: for non-secret app configurations. These will override OS env vars if present.
+# 2. .env: for secrets. These will NOT override anything already set by OS or app_settings.env.
+
+project_root = Path(__file__).resolve().parent.parent
+
+# Load non-secret app settings (e.g., channel names, feature flags)
+# These will take precedence over OS environment variables for the same keys.
+load_dotenv(dotenv_path=project_root / 'app_settings.env', override=True)
+
+# Load secrets from .env file.
+# These will only be loaded if not already present in the environment (e.g., from OS or app_settings.env).
+load_dotenv(dotenv_path=project_root / '.env', override=False)
 
 # Get configuration from environment variables
 API_ID = os.getenv('API_ID')
@@ -153,6 +161,7 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
                 await client_instance.send_message(channel, text_content)
 
         # Use only RIGHT style - much simpler logic
+        # Check for OpenAI client *before* attempting to translate
         if not openai_client:
             logger.error("Cannot translate without OpenAI client.")
             return False
@@ -697,7 +706,7 @@ async def main():
                 sequential_updates=True,
                 flood_sleep_threshold=60
             )
-            
+    
             # Try to connect with timeout
             logger.info(f"Connecting with timeout {connection_timeout}s...")
             try:
@@ -733,28 +742,30 @@ async def main():
     # If we couldn't connect with any method, exit
     if not connected or not client:
         logger.error("Failed to connect to Telegram with any connection method. Please check your network.")
-        return False
+        return False # Indicate failure to the caller, or sys.exit(1) if main is run directly always
     
-    # Now try to authenticate
+    # Check authorization. On Heroku, we MUST be authorized by the session string.
+    # No interactive authentication should be attempted.
     try:
-        if await client.is_user_authorized():
-            logger.info("Successfully authenticated using saved session")
+        if not await client.is_user_authorized():
+            logger.critical(
+                "Telegram client is NOT AUTHORIZED. This usually means the session string provided via "
+                "TG_COMPRESSED_SESSION_STRING is missing, invalid, or expired. "
+                "Please run 'create_heroku_session.py' locally to generate a new session, "
+                "then update the TG_COMPRESSED_SESSION_STRING environment variable on Heroku "
+                "(e.g., by re-running 'setup_heroku.sh'). Exiting."
+            )
+            await client.disconnect()
+            return False # Indicate failure
         else:
-            # If not authorized, then try regular authentication
-            logger.info("Saved session not valid, attempting phone authentication...")
-            await client.start(phone=PHONE)
+            logger.info("Successfully authenticated using session provided by environment variable.")
     except Exception as e:
-        logger.error(f"Error authenticating: {str(e)}")
-        await client.disconnect()
-        return False
+        logger.error(f"Error during authorization check: {str(e)}. This might indicate a problem with the session or connection. Exiting.", exc_info=True)
+        if client and client.is_connected():
+            await client.disconnect()
+        return False # Indicate failure
     
-    logger.info("Client started successfully")
-    
-    # Check if user is authorized
-    if not await client.is_user_authorized():
-        logger.error("User is not authorized. Please check your session file or authentication.")
-        await client.disconnect()
-        return False
+    logger.info("Client started successfully and is authorized.")
     
     # Handle the --process-recent argument
     if args.process_recent:

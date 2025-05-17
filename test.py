@@ -43,7 +43,9 @@ except ImportError:
     TELETHON_AVAILABLE = False
 
 # Load environment variables
-load_dotenv()
+project_root = Path(__file__).resolve().parent.parent # Assuming test.py is in the root
+load_dotenv(dotenv_path=project_root / 'app_settings.env', override=True)
+load_dotenv(dotenv_path=project_root / '.env', override=False)
 
 # Configure logging
 logging.basicConfig(
@@ -343,7 +345,7 @@ async def run_telegram_test(args):
         logger.info("Successfully connected and authenticated to Telegram")
 
         # We're using a simpler direct processing approach rather than relying on event handlers
-        
+            
         # Send test message to source channel
         logger.info(f"Sending test message to {TEST_SRC_CHANNEL}...")
         sent_msg = await client.send_message(TEST_SRC_CHANNEL, TEST_MESSAGE)
@@ -359,11 +361,11 @@ async def run_telegram_test(args):
         # Use longer test text now to ensure quality image generation
         longer_test_text = TEST_MESSAGE 
         success = await translate_and_post(
-            client,
+                            client,
             longer_test_text,
             sent_msg.id,
-            destination_channel=TEST_DST_CHANNEL
-        )
+                            destination_channel=TEST_DST_CHANNEL
+                        )
         
         if not success:
             logger.error("Failed to process test message")
@@ -372,15 +374,14 @@ async def run_telegram_test(args):
         logger.info("✅ Translation and posting completed successfully")
         
         # Verify that the message appears in the destination channel
-        logger.info(f"Verifying message appears in {TEST_DST_CHANNEL}...")
-        
-        # Only check for RIGHT style (the only one we use)
+        logger.info(f"Verifying RIGHT style message in {TEST_DST_CHANNEL}...")
         right_verified = await verify_message_in_channel(client, TEST_DST_CHANNEL, "RIGHT-BIDLO VERSION", timeout=60)
-        if not right_verified:
+
+        if right_verified:
+            logger.info("RIGHT-BIDLO translation verified in destination channel")
+        else:
             logger.error("Failed to verify RIGHT-BIDLO translation in destination channel")
             return False
-            
-        logger.info("RIGHT-BIDLO translation verified in destination channel")
         
         # Check for NYT link in the posted message
         logger.info("Verifying source attribution appears in posted message...")

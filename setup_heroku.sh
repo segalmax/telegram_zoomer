@@ -3,44 +3,53 @@
 
 set -e # Exit on error
 
-# Check if app name is provided
-if [ -z "$1" ]; then
-  echo "Usage: ./setup_heroku.sh <heroku-app-name>"
+APP_SETTINGS_ENV_FILE="app_settings.env"
+SECRET_ENV_FILE=".env"
+
+# Check if app_settings.env file exists
+if [ ! -f "$APP_SETTINGS_ENV_FILE" ]; then
+  echo "Error: App settings environment file '$APP_SETTINGS_ENV_FILE' not found."
   exit 1
 fi
 
-APP_NAME="$1"
-ENV_FILE=".env"
+# Source Heroku App Name from app_settings.env
+HEROKU_APP_NAME_FROM_SETTINGS=$(grep "^HEROKU_APP_NAME=" "$APP_SETTINGS_ENV_FILE" 2>/dev/null | cut -d '=' -f2-)
+if [ -z "$HEROKU_APP_NAME_FROM_SETTINGS" ]; then
+  echo "Error: HEROKU_APP_NAME not found in $APP_SETTINGS_ENV_FILE. Please add it."
+  exit 1
+fi
+APP_NAME="$HEROKU_APP_NAME_FROM_SETTINGS"
+echo "Using Heroku App Name from $APP_SETTINGS_ENV_FILE: [$APP_NAME]"
 
-# Determine session path: Use TG_SESSION from .env if set, otherwise default
-SESSION_PATH_FROM_ENV=$(grep "^TG_SESSION=" "$ENV_FILE" 2>/dev/null | cut -d '=' -f2-)
-if [ -z "$SESSION_PATH_FROM_ENV" ]; then
-  # Fallback if TG_SESSION not in .env, though it's expected for this project
-  # The python export_session.py script takes the session path as an argument
-  # For this shell script, we need a reliable way to know which session to export.
-  # Defaulting to 'new_session' as per user's .env configuration for the main bot.
-  ACTUAL_SESSION_PATH="new_session"
-  echo "Warning: TG_SESSION not found in $ENV_FILE. Assuming session path is '$ACTUAL_SESSION_PATH' for export."
+# Check if essential files exist
+if [ ! -f "$SECRET_ENV_FILE" ]; then
+  echo "Error: Secret environment file '$SECRET_ENV_FILE' not found."
+  exit 1
+fi
+if [ ! -f "$APP_SETTINGS_ENV_FILE" ]; then
+  echo "Error: App settings environment file '$APP_SETTINGS_ENV_FILE' not found."
+  exit 1
+fi
+
+# Determine session path: Must come from app_settings.env
+SESSION_PATH_FROM_APP_SETTINGS=$(grep "^TG_SESSION=" "$APP_SETTINGS_ENV_FILE" 2>/dev/null | cut -d '=' -f2-)
+if [ -z "$SESSION_PATH_FROM_APP_SETTINGS" ]; then
+  echo "Error: TG_SESSION not found in $APP_SETTINGS_ENV_FILE. This is required."
+  exit 1
 else
-  ACTUAL_SESSION_PATH="$SESSION_PATH_FROM_ENV"
-  echo "Using session path from TG_SESSION in $ENV_FILE: $ACTUAL_SESSION_PATH"
-fi
-
-# Check if .env file exists
-if [ ! -f "$ENV_FILE" ]; then
-  echo "Error: .env file not found at $ENV_FILE"
-  exit 1
+  ACTUAL_SESSION_PATH="$SESSION_PATH_FROM_APP_SETTINGS"
+  echo "Using session path from TG_SESSION in $APP_SETTINGS_ENV_FILE: $ACTUAL_SESSION_PATH"
 fi
 
 # Check if the determined session file exists
 if [ ! -f "${ACTUAL_SESSION_PATH}.session" ]; then
   echo "Error: Session file ${ACTUAL_SESSION_PATH}.session not found"
-  echo "Please run the bot locally (python -m app.bot) with TG_SESSION=${ACTUAL_SESSION_PATH} in your .env to create and authorize this session file."
+  echo "Please run create_heroku_session.py or ensure TG_SESSION in $APP_SETTINGS_ENV_FILE points to an existing session file."
   exit 1
 fi
 
 # Export session and other state data to base64
-echo "Exporting Telethon session string and application state..."
+echo "Exporting Telethon session string and application state using session: $ACTUAL_SESSION_PATH ..."
 EXPORT_OUTPUT=$(python3 export_session.py "$ACTUAL_SESSION_PATH")
 
 if [[ $EXPORT_OUTPUT == *"Error:"* ]]; then
@@ -52,8 +61,8 @@ fi
 # Extract the line containing the heroku config:set command suggestion
 HEROKU_COMMAND_LINE=$(echo "$EXPORT_OUTPUT" | grep "heroku config:set")
 
-# Extract only the 'KEY="VALUE" KEY2="VALUE2"' part
-CONFIG_VARS_TO_SET=$(echo "$HEROKU_COMMAND_LINE" | sed -e "s/heroku config:set //" -e "s/ --app YOUR_APP_NAME//")
+# Extract only the 'KEY="VALUE" KEY2="VALUE2"' part, now expecting TG_COMPRESSED_SESSION_STRING
+CONFIG_VARS_TO_SET=$(echo "$HEROKU_COMMAND_LINE" | sed -e "s/heroku config:set //" -e "s/ --app YOUR_APP_NAME//" | sed -e "s/TG_SESSION_STRING/TG_COMPRESSED_SESSION_STRING/g")
 
 if [ -z "$CONFIG_VARS_TO_SET" ]; then
   echo "Error: Failed to extract necessary data from export_session.py output."
@@ -64,23 +73,39 @@ fi
 
 echo "Variables to set from export_session.py: $CONFIG_VARS_TO_SET"
 
-# Set Heroku config vars from .env file (excluding TG_SESSION and others managed by export_session.py)
-echo "Setting general environment variables from $ENV_FILE on Heroku app: $APP_NAME"
-# Exclude TG_SESSION (session name for local client), TG_SESSION_STRING (actual session content),
-# and LAST_PROCESSED_STATE (app state). These are handled by export_session.py output.
-EXCLUDED_VARS="^(TG_SESSION|TG_SESSION_STRING|LAST_PROCESSED_STATE)=.*"
+# Function to set vars from a file
+set_vars_from_file() {
+  local file_to_process="$1"
+  local excluded_vars="$2"
+  echo "Processing $file_to_process for Heroku config vars..."
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    # Skip empty lines and comments
+    if [[ -z "$line" || "$line" == \#* ]]; then
+      continue
+    fi
+    # Skip excluded vars if any
+    if [[ -n "$excluded_vars" && "$line" =~ $excluded_vars ]]; then
+        echo "Skipping excluded var: $line"
+        continue
+    fi
+    echo "Setting from $file_to_process: $line"
+    heroku config:set "$line" --app "$APP_NAME"
+  done < "$file_to_process"
+}
 
-while IFS= read -r line || [[ -n "$line" ]]; do
-  # Skip empty lines, comments, and excluded vars
-  if [[ -z "$line" || "$line" == \#* || "$line" =~ $EXCLUDED_VARS ]]; then
-    continue
-  fi
-  
-  echo "Setting: $line"
-  heroku config:set "$line" --app "$APP_NAME"
-done < "$ENV_FILE"
+# Set Heroku config vars from .env (secrets)
+# Exclude TG_SESSION, TG_COMPRESSED_SESSION_STRING, TG_SESSION_STRING (old), LAST_PROCESSED_STATE
+EXCLUDED_FOR_SECRET_ENV="^(TG_SESSION|TG_COMPRESSED_SESSION_STRING|TG_SESSION_STRING|LAST_PROCESSED_STATE)=.*"
+echo "Setting secret environment variables from $SECRET_ENV_FILE on Heroku app: $APP_NAME"
+set_vars_from_file "$SECRET_ENV_FILE" "$EXCLUDED_FOR_SECRET_ENV"
 
-# Set the crucial exported data (TG_SESSION_STRING and LAST_PROCESSED_STATE)
+# Set Heroku config vars from app_settings.env (app configuration)
+# Exclude TG_SESSION, TG_COMPRESSED_SESSION_STRING, TG_SESSION_STRING (old), LAST_PROCESSED_STATE
+EXCLUDED_FOR_APP_SETTINGS="^(TG_SESSION|TG_COMPRESSED_SESSION_STRING|TG_SESSION_STRING|LAST_PROCESSED_STATE)=.*"
+echo "Setting application settings from $APP_SETTINGS_ENV_FILE on Heroku app: $APP_NAME"
+set_vars_from_file "$APP_SETTINGS_ENV_FILE" "$EXCLUDED_FOR_APP_SETTINGS"
+
+# Set the crucial exported data (TG_COMPRESSED_SESSION_STRING and LAST_PROCESSED_STATE)
 echo "Setting exported Telethon session string and application state..."
 heroku config:set $CONFIG_VARS_TO_SET --app "$APP_NAME"
 
@@ -97,10 +122,16 @@ if heroku config:get USE_ENV_PTS_STORAGE --app "$APP_NAME" >/dev/null 2>&1; then
   heroku config:unset USE_ENV_PTS_STORAGE --app "$APP_NAME"
 fi
 
-# Check if old SESSION_DATA is set and unset it (replaced by TG_SESSION_STRING)
+# Check if old SESSION_DATA is set and unset it (replaced by TG_COMPRESSED_SESSION_STRING or TG_SESSION_STRING)
 if heroku config:get SESSION_DATA --app "$APP_NAME" >/dev/null 2>&1; then
-  echo "Unsetting obsolete SESSION_DATA variable (replaced by TG_SESSION_STRING)..."
+  echo "Unsetting obsolete SESSION_DATA variable (replaced by TG_COMPRESSED_SESSION_STRING/TG_SESSION_STRING)..."
   heroku config:unset SESSION_DATA --app "$APP_NAME"
+fi
+
+# Also try to unset the uncompressed TG_SESSION_STRING if the compressed one is now primary
+if heroku config:get TG_SESSION_STRING --app "$APP_NAME" >/dev/null 2>&1; then
+  echo "Unsetting old TG_SESSION_STRING as TG_COMPRESSED_SESSION_STRING is now used..."
+  heroku config:unset TG_SESSION_STRING --app "$APP_NAME"
 fi
 
 echo "Done! Heroku environment is now configured for app: $APP_NAME" 

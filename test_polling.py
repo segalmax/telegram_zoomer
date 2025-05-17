@@ -29,7 +29,9 @@ except ImportError:
     sys.exit(1)
 
 # Load environment variables
-load_dotenv()
+project_root = Path(__file__).resolve().parent # Assuming test_polling.py is in the root
+load_dotenv(dotenv_path=project_root / 'app_settings.env', override=True)
+load_dotenv(dotenv_path=project_root / '.env', override=False)
 
 # Configure logging
 logging.basicConfig(

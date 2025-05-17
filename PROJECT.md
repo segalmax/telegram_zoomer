@@ -98,7 +98,7 @@
 - [ ] Store processed message IDs to avoid re-processing after restarts (if not already handled by fetching only new ones)
 - [ ] Improve logging structure (e.g., JSON logs, more context)
 - [ ] CI/CD pipeline for automated testing and deployment
-- [ ] Add more unit and integration tests
+- [ ] Add more unit and integration tests 
 
 # Testing Documentation
 
@@ -553,3 +553,16 @@ The database lock prevention system significantly improves reliability by:
 - Added extensive logging to track polling behavior
 
 These improvements make the bot fully compatible with Telegram's April 2024 change that requires proper short-polling for large channels, while maintaining compatibility with Heroku's ephemeral filesystem environment.
+
+### Heroku Deployment & Management
+
+-   `Procfile`: Defines the process types for Heroku (e.g., `worker: python -m app.bot`).
+-   `runtime.txt`: Specifies the Python runtime version for Heroku.
+-   `setup_heroku.sh`: Script to configure Heroku environment variables by exporting local session data (`TG_SESSION_STRING`) and application state (`LAST_PROCESSED_STATE`).
+    -   **Troubleshooting: Heroku Config Var Size Limit**: If `setup_heroku.sh` fails with an error like "Your app config vars combined must be under 64kB", it's likely because the `TG_SESSION_STRING` is too large. This happens when the underlying Telethon session file (e.g., `session/your_session_name.session`) has accumulated a lot of data.
+        -   **Solution**:
+            1.  Create a new, clean Telethon session file specifically for Heroku (e.g., by running a minimal script that connects, authenticates if necessary, and disconnects).
+            2.  Update your local `.env` file's `TG_SESSION` variable to point to this new, clean session name.
+            3.  Re-run `setup_heroku.sh`. This will generate a much smaller `TG_SESSION_STRING`.
+-   `heroku_session_setup.py`: (Potentially obsolete or for specific one-off setups, review usage).
+-   Environment Variables:

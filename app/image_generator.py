@@ -14,8 +14,11 @@ import base64
 from io import BytesIO
 import platform
 from dotenv import load_dotenv
+from pathlib import Path
 
-load_dotenv()
+project_root = Path(__file__).resolve().parent.parent
+load_dotenv(dotenv_path=project_root / 'app_settings.env', override=True)
+load_dotenv(dotenv_path=project_root / '.env', override=False)
 
 logger = logging.getLogger(__name__)
 

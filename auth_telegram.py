@@ -9,6 +9,7 @@ import logging
 from telethon import TelegramClient
 from telethon.network import ConnectionTcpAbridged
 from dotenv import load_dotenv
+from pathlib import Path
 
 # Configure logging
 logging.basicConfig(
@@ -18,7 +19,9 @@ logging.basicConfig(
 logger = logging.getLogger('telegram_auth')
 
 # Load environment variables
-load_dotenv()
+project_root = Path(__file__).resolve().parent.parent
+load_dotenv(dotenv_path=project_root / 'app_settings.env', override=True)
+load_dotenv(dotenv_path=project_root / '.env', override=False)
 
 # Get configuration
 API_ID = int(os.getenv('TG_API_ID'))

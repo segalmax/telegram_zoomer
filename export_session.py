@@ -13,6 +13,7 @@ import sys
 import json
 from datetime import datetime, timedelta
 import logging
+import gzip # Added for compression
 
 # Default location for the PTS data file, mirrors app/pts_manager.py
 PTS_DATA_FILE = os.getenv("PTS_DATA_FILE", "session/channel_pts.json")
@@ -20,15 +21,18 @@ PTS_DATA_FILE = os.getenv("PTS_DATA_FILE", "session/channel_pts.json")
 # APP_STATE_FILE should be consistent with session_manager.py
 APP_STATE_FILE = "session/app_state.json" 
 
-def export_session_to_base64(session_path):
+# New environment variable name for the compressed session string
+COMPRESSED_SESSION_ENV_VAR = "TG_COMPRESSED_SESSION_STRING"
+
+def export_session_to_base64_compressed(session_path):
     """
-    Export a session file to base64 encoding
+    Export a session file to gzip compressed and base64 encoding
     
     Args:
         session_path (str): Path to the session file (without .session extension)
     
     Returns:
-        str: Base64 encoded session data or None
+        str: Gzip compressed and Base64 encoded session data or None
     """
     session_file = f"{session_path}.session"
     
@@ -40,10 +44,15 @@ def export_session_to_base64(session_path):
         with open(session_file, 'rb') as f:
             session_data = f.read()
         
-        encoded_data = base64.b64encode(session_data).decode('utf-8')
+        compressed_data = gzip.compress(session_data)
+        encoded_data = base64.b64encode(compressed_data).decode('utf-8')
+        original_size = len(session_data)
+        compressed_size = len(compressed_data)
+        encoded_size = len(encoded_data)
+        logger.info(f"Session data: Original size: {original_size} bytes, Compressed: {compressed_size} bytes, Encoded: {encoded_size} bytes")
         return encoded_data
     except Exception as e:
-        print(f"Error exporting session: {str(e)}")
+        print(f"Error exporting and compressing session: {str(e)}")
         return None
 
 def get_app_state_base64():
@@ -99,25 +108,25 @@ def create_export_commands(session_path):
     Returns:
         str: Heroku CLI command for setting environment variables or None
     """
-    # Export the session data
-    encoded_session = export_session_to_base64(session_path)
-    if not encoded_session:
+    # Export the session data (compressed and base64 encoded)
+    encoded_compressed_session = export_session_to_base64_compressed(session_path)
+    if not encoded_compressed_session:
         return None
     
     # Get current application state, base64 encoded
     encoded_app_state = get_app_state_base64()
     
     # Display truncated data for confirmation
-    session_display = f"{encoded_session[:30]}..." if len(encoded_session) > 30 else encoded_session
+    session_display = f"{encoded_compressed_session[:30]}... (compressed)" if len(encoded_compressed_session) > 30 else encoded_compressed_session
     app_state_display = f"{encoded_app_state[:30]}..." if len(encoded_app_state) > 30 else encoded_app_state
 
-    # Standardizing on TG_SESSION_STRING for the session content itself
-    print(f"Telethon session string (TG_SESSION_STRING): {session_display}") 
+    # Use the new environment variable name for the compressed session
+    print(f"Telethon compressed session string ({COMPRESSED_SESSION_ENV_VAR}): {session_display}") 
     print(f"Application state (LAST_PROCESSED_STATE): {app_state_display}")
     
     # Use a single command to set all variables
     command = (
-        f'heroku config:set TG_SESSION_STRING="{encoded_session}" '
+        f'heroku config:set {COMPRESSED_SESSION_ENV_VAR}=\"{encoded_compressed_session}\" '
         f'LAST_PROCESSED_STATE="{encoded_app_state}" --app YOUR_APP_NAME'
     )
     
