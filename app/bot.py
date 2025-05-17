@@ -26,6 +26,7 @@ from telethon.errors import SessionPasswordNeededError
 from datetime import datetime, timedelta
 import random
 import argparse
+from .pts_manager import load_pts, save_pts
 
 # Load environment variables explicitly from project root
 dotenv_path = Path(__file__).resolve().parent.parent / '.env'
@@ -436,6 +437,74 @@ async def background_channel_poller(client):
             logger.error(f"Error setting up channel polling: {e}")
             await asyncio.sleep(60)  # Sleep on error
 
+async def poll_big_channel(client, channel_username):
+    """
+    Correctly poll a large "megachannel" using updates.getChannelDifference
+    to receive updates even when Telegram stops pushing them.
+    
+    Args:
+        client: The Telegram client instance
+        channel_username: The channel username to poll (e.g. 'nytimes')
+    """
+    logger.info(f"Starting proper megachannel polling for {channel_username}")
+    
+    while True:
+        try:
+            # Get channel entity
+            channel = await client.get_entity(channel_username)
+            
+            # Create input channel
+            input_channel = InputChannel(channel_id=channel.id, access_hash=channel.access_hash)
+            
+            # Get stored pts value from our new pts_manager
+            pts = load_pts(channel_username)
+            logger.info(f"Polling channel {channel_username} with pts={pts}")
+            
+            # Keep fetching differences until we get a final=True response
+            while True:
+                try:
+                    diff = await client(GetChannelDifferenceRequest(
+                        channel=input_channel,
+                        filter=ChannelMessagesFilterEmpty(),
+                        pts=pts,
+                        limit=100
+                    ))
+                    
+                    # Get the correct PTS value
+                    pts = diff.pts if hasattr(diff, "pts") else diff.state.pts
+                    logger.debug(f"Updated pts value to {pts}")
+                    
+                    # Save the pts for this channel
+                    save_pts(channel_username, pts)
+                    
+                    # Process new messages
+                    msg_count = len(getattr(diff, 'new_messages', []))
+                    if msg_count > 0:
+                        logger.info(f"Channel polling: received {msg_count} new messages")
+                        
+                        for new_msg in diff.new_messages:
+                            if hasattr(new_msg, 'message') and new_msg.message:
+                                logger.info(f"Processing message from poll: {new_msg.id}")
+                                await translate_and_post(client, new_msg.message, new_msg.id)
+                    
+                    # If this is a final update, break out of the inner loop
+                    if getattr(diff, 'final', False):
+                        logger.debug(f"Received final=True, updates complete")
+                        break
+                    
+                except Exception as e:
+                    logger.error(f"Error in poll_big_channel inner loop: {e}")
+                    break
+            
+            # Get the timeout value or default to 30 seconds
+            sleep_seconds = getattr(diff, 'timeout', 30)
+            logger.debug(f"Sleeping for {sleep_seconds} seconds before next poll")
+            await asyncio.sleep(sleep_seconds)
+            
+        except Exception as e:
+            logger.error(f"Error in poll_big_channel: {e}")
+            await asyncio.sleep(60)  # Sleep on error before retry
+
 async def main():
     """Main function to run the bot"""
     # Check if required environment variables are set
@@ -557,10 +626,8 @@ async def main():
         logger.info(f"New message event received from {SRC_CHANNEL}, ID: {event.message.id}")
         await translate_and_post(client, event.message.text, event.message.id)
     
-    # Start background tasks for robust operation
-    asyncio.create_task(background_keep_alive(client))
-    asyncio.create_task(background_update_checker(client))
-    asyncio.create_task(background_channel_poller(client))
+    # Start the proper megachannel polling task
+    asyncio.create_task(poll_big_channel(client, SRC_CHANNEL))
     
     logger.info(f"Bot is now running, listening to {SRC_CHANNEL}")
     logger.info(f"Translation style: {TRANSLATION_STYLE}")
