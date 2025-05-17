@@ -26,9 +26,11 @@ from io import BytesIO
 from dotenv import load_dotenv
 import openai
 from pathlib import Path
+import json
 from app.translator import get_openai_client, translate_text
 from app.image_generator import generate_image_for_post, generate_image_with_stability_ai
-from app.bot import translate_and_post
+from app.bot import translate_and_post, main as bot_main
+from app.pts_manager import load_pts, save_pts
 
 # Try to import Telegram if needed
 try:
@@ -89,6 +91,46 @@ TEST_DST_CHANNEL = os.getenv('TEST_DST_CHANNEL')
 
 # Persistent test session file
 PERSISTENT_TEST_SESSION = "session/test_session_persistent"
+
+# Ephemeral storage for Heroku - store PTS in environment variable
+def save_heroku_pts(channel_username, pts):
+    """Store PTS in environment variable for Heroku's ephemeral filesystem"""
+    try:
+        # Get existing data if any
+        pts_data = {}
+        if 'CHANNEL_PTS_DATA' in os.environ:
+            pts_data = json.loads(os.environ['CHANNEL_PTS_DATA'])
+        
+        # Update with new value
+        pts_data[channel_username] = pts
+        
+        # Save back to environment
+        os.environ['CHANNEL_PTS_DATA'] = json.dumps(pts_data)
+        logger.debug(f"Saved PTS={pts} for {channel_username} to environment variable")
+    except Exception as e:
+        logger.error(f"Error saving PTS to environment: {e}")
+
+def load_heroku_pts(channel_username):
+    """Load PTS from environment variable for Heroku's ephemeral filesystem"""
+    try:
+        if 'CHANNEL_PTS_DATA' in os.environ:
+            pts_data = json.loads(os.environ['CHANNEL_PTS_DATA'])
+            pts = pts_data.get(channel_username, 0)
+            logger.debug(f"Loaded PTS={pts} for {channel_username} from environment variable")
+            return pts
+    except Exception as e:
+        logger.error(f"Error loading PTS from environment: {e}")
+    
+    return 0
+
+# Patch the pts_manager functions to use environment variables instead of files
+# This makes the bot compatible with Heroku's ephemeral filesystem
+def patch_pts_functions_for_heroku():
+    """Replace the file-based PTS storage with environment variable storage for Heroku"""
+    import app.pts_manager
+    app.pts_manager.save_pts = save_heroku_pts
+    app.pts_manager.load_pts = load_heroku_pts
+    logger.info("Patched PTS storage functions to use environment variables")
 
 #
 # API Integration Tests
@@ -420,11 +462,26 @@ async def main():
     parser = argparse.ArgumentParser(description='Full End-to-End Test for Telegram Zoomer Bot')
     
     # Optional arguments
+    parser.add_argument('--bot-mode', action='store_true', help='Run the actual bot with test channels (for Heroku tests)')
     parser.add_argument('--stability', action='store_true', help='Test with Stability AI image generation')
     parser.add_argument('--no-images', action='store_true', help='Disable image generation for testing')
     parser.add_argument('--new-session', action='store_true', help='Force creation of a new session (requires re-authentication)')
     
     args = parser.parse_args()
+    
+    # Special mode to run the actual bot instead of the tests
+    if hasattr(args, 'bot_mode') and args.bot_mode:
+        logger.info("=== Running in REAL BOT MODE with test channels ===")
+        
+        # Patch the environment to use test channels
+        os.environ['SRC_CHANNEL'] = TEST_SRC_CHANNEL
+        os.environ['DST_CHANNEL'] = TEST_DST_CHANNEL
+        
+        # Patch PTS storage for Heroku compatibility
+        patch_pts_functions_for_heroku()
+        
+        # Run the actual bot's main function
+        return await bot_main()
     
     success = True
     
