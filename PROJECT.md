@@ -458,3 +458,90 @@ FUNCTION process_recent_messages(client, count):
 | Auto-Reconnection       | Handle temporary connection losses         | Detect and reestablish dropped connections  |
 | Message State Persistence | Track last processed message across restarts | Store message ID and timestamp in environment variables |
 | Recovery Upon Restart   | Process messages missed during downtime    | Check for messages newer than last processed ID at startup |
+
+# Recent Improvements - Reliable Megachannel Polling
+
+## PTS Management System
+The bot now uses a robust Position Token for Sequence (PTS) management system that enables reliable polling for large Telegram channels (megachannels):
+
+- Implemented a dedicated `pts_manager.py` module that manages channel-specific PTS values
+- PTS values are persisted using JSON file storage with environment variable fallback for Heroku
+- Properly handles the "Persistent timestamp empty" error during polling initialization
+
+## Enhanced Polling Mechanism
+The previous implementation used three separate background tasks for different types of polling. These have been consolidated into a single, more reliable approach:
+
+```
+FUNCTION poll_big_channel(client, channel_username):
+    TRACK first poll status
+    TRACK message processing status to prevent DB locks
+    
+    WHILE true:
+        IF currently processing a message:
+            BRIEF sleep to avoid DB locks
+            CONTINUE
+        
+        TRY:
+            GET channel entity
+            CREATE input channel
+            GET stored PTS value
+            
+            IF first poll AND no PTS value:
+                GET latest message directly
+                PROCESS latest message
+                GET PTS from dialog entity
+                SAVE initial PTS value
+                MARK first poll as done
+                CONTINUE
+                
+            POLL for channel differences using PTS
+            SAVE updated PTS value
+            
+            FOR each new message:
+                PROCESS message
+                
+            SLEEP based on recommended timeout or default interval
+            
+        CATCH database locked error:
+            SLEEP longer to allow locks to clear
+        CATCH other errors:
+            LOG error
+            SLEEP before retry
+```
+
+## Heroku Compatibility
+The bot is now fully compatible with Heroku's ephemeral filesystem:
+
+- Added patching mechanism to replace file-based PTS storage with environment variables (`CHANNEL_PTS_DATA` or by setting `USE_ENV_PTS_STORAGE=true`). This is now auto-detected in `app.pts_manager`.
+- Implemented proper serialization/deserialization of PTS data via JSON.
+- Created fallback mechanisms to ensure data persistence across dyno restarts.
+- Updated Procfile with correct worker command
+
+## Error Handling Improvements
+- Added special handling for database lock errors with longer sleep periods
+- Improved detection and recovery from "Persistent timestamp empty" errors
+- Better handling of first-time polling initialization
+- More robust message processing with completion tracking
+
+## Database Lock Prevention
+SQLite session files used by Telethon can encounter "database is locked" errors when accessed by multiple processes or during abnormal termination. Improvements include:
+
+- **Message processing flag**: Added a `processing_message` flag to prevent polling during active message processing
+- **Conditional polling**: Skip polling cycles if a message is currently being processed
+- **Longer recovery sleeps**: Extended sleep times (120s) when database locks are detected to allow locks to clear
+- **Session cleanup tools**: Added `scripts/unlock_sessions.sh` to help diagnose and fix session lock issues
+- **Automatic cleanup**: Enhanced `test_polling_flow.sh` to automatically clean up session journal files
+
+The database lock prevention system significantly improves reliability by:
+1. Isolating database operations to prevent concurrent access
+2. Adding proper detection and recovery for lock errors
+3. Implementing graceful handling rather than crashing the process
+4. Providing tools to diagnose and resolve persistent issues
+
+## Testing Framework
+- Added `test_polling.py` script to send test messages that trigger the polling mechanism
+- Created `test_polling_flow.sh` to automate the testing process
+- Made test mode compatible with the new polling mechanism
+- Added extensive logging to track polling behavior
+
+These improvements make the bot fully compatible with Telegram's April 2024 change that requires proper short-polling for large channels, while maintaining compatibility with Heroku's ephemeral filesystem environment.

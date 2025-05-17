@@ -9,6 +9,8 @@ A bot that monitors a Telegram channel (NYT), translates messages to Russian Zoo
 - Robust error handling with retries
 - Persistent session storage
 - Comprehensive logging
+- Reliable megachannel polling using PTS (Position Token for Sequence)
+- Heroku compatibility with ephemeral filesystem support
 
 ## Setup
 
@@ -38,8 +40,11 @@ The bot is configured through environment variables set in a `.env` file or via 
 | MANUAL_POLL_INTERVAL  | Interval for manual polling (sec)           | No       | 180           |
 | SESSION_DATA          | Base64 encoded session data (Heroku)        | No*      | -             |
 | LAST_PROCESSED_STATE  | Base64 encoded message state (Heroku)       | No       | -             |
+| CHANNEL_PTS_DATA      | JSON string with channel PTS values (Heroku)| No       | -             |
+| PTS_DATA_FILE         | Path to PTS data file                       | No       | session/channel_pts.json |
+| USE_ENV_PTS_STORAGE   | Force use of env vars for PTS (`true`/`false`)| No       | false         |
 
-*Required for Heroku deployment
+*Required for Heroku deployment (`SESSION_DATA`, `CHANNEL_PTS_DATA` typically provided by Heroku setup or `USE_ENV_PTS_STORAGE=true`)
 
 ### Configuration
 
@@ -131,6 +136,64 @@ The bot is designed to work seamlessly on Heroku:
    ```
 
 The session and message state persistence is handled automatically, allowing the bot to maintain its state even when Heroku restarts dynos.
+
+## Polling Mechanism
+
+The bot uses a sophisticated polling mechanism to reliably receive updates from large Telegram channels (megachannels):
+
+### How Polling Works
+
+1. **PTS (Position Token for Sequence)**: Each channel has a PTS value that represents the latest update point.
+2. **GetChannelDifferenceRequest**: The bot uses Telegram's API to request all updates since the last PTS.
+3. **Persistence**: 
+    - By default, PTS values are stored in a JSON file (defined by `PTS_DATA_FILE`, defaults to `session/channel_pts.json`).
+    - For Heroku and other ephemeral environments, PTS can be stored in the `CHANNEL_PTS_DATA` environment variable (as a JSON string). This is automatically used if `CHANNEL_PTS_DATA` is found or if `USE_ENV_PTS_STORAGE` is set to `true`.
+4. **Error Handling**: Special handling for "Persistent timestamp empty" errors during initialization.
+5. **DB Lock Prevention**: Skips polling cycles during message processing to prevent database locks.
+
+### Testing Polling
+
+To test the polling mechanism:
+
+```bash
+# Start the bot in test mode (background)
+./test_polling_flow.sh
+
+# In another terminal, send a test message
+python test_polling.py
+```
+
+The bot should detect the message via polling rather than event handlers.
+
+## Troubleshooting
+
+### Database Lock Issues
+
+Telegram's Telethon library uses SQLite for session storage, which can occasionally lead to "database is locked" errors, especially when:
+- Multiple bot instances are running simultaneously
+- A process was terminated abnormally
+- Session files are being accessed from different processes
+
+To resolve database lock issues:
+
+1. Run the provided troubleshooting script:
+   ```bash
+   ./scripts/unlock_sessions.sh
+   ```
+
+2. Manually clean up session journal files:
+   ```bash
+   # Remove all session journal files
+   find . -name "*.session-journal" -type f -delete
+   ```
+
+3. If issues persist, try using a new session:
+   ```bash
+   # Run with a new temporary session
+   python test.py --new-session
+   ```
+
+4. Ensure all bot processes are fully terminated before starting new ones.
 
 ### Monitoring and Maintenance
 

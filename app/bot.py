@@ -39,7 +39,7 @@ else:
 API_ID = os.getenv('API_ID')
 API_HASH = os.getenv('API_HASH')
 PHONE = os.getenv('PHONE') or os.getenv('TG_PHONE')  # Check both variable names
-SESSION_PATH = os.getenv('SESSION_PATH', 'session/nyt_zoomer')
+SESSION_PATH = os.getenv('TG_SESSION', 'session/nyt_zoomer')
 SRC_CHANNEL = os.getenv('SRC_CHANNEL')
 DST_CHANNEL = os.getenv('DST_CHANNEL')
 TRANSLATION_STYLE = os.getenv('TRANSLATION_STYLE', 'right')  # right only by default
@@ -50,6 +50,16 @@ CHECK_CHANNEL_INTERVAL = int(os.getenv('CHECK_CHANNEL_INTERVAL', '300'))  # Defa
 KEEP_ALIVE_INTERVAL = int(os.getenv('KEEP_ALIVE_INTERVAL', '60'))  # Keep connection alive every minute
 MANUAL_POLL_INTERVAL = int(os.getenv('MANUAL_POLL_INTERVAL', '180'))  # Manual polling every 3 minutes
 USE_STABILITY_AI = os.getenv('USE_STABILITY_AI', 'false').lower() == 'true'
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+    ]
+)
+logger = logging.getLogger('app.bot')
 
 # Check for TEST_SRC_CHANNEL and TEST_DST_CHANNEL environment variables
 # This helps us switch to test mode when running tests
@@ -64,16 +74,6 @@ if os.getenv('TEST_MODE', 'false').lower() == 'true':
     if os.getenv('TEST_DST_CHANNEL'):
         DST_CHANNEL = os.getenv('TEST_DST_CHANNEL')
         logger.info(f"Using TEST destination channel: {DST_CHANNEL}")
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(),
-    ]
-)
-logger = logging.getLogger('app.bot')
 
 # Configuration from environment variables
 try:
@@ -648,7 +648,7 @@ async def main():
         try:
             # Use a custom connection with configurable parameters
             client = TelegramClient(
-                SESSION,
+                SESSION_PATH,
                 API_ID, 
                 API_HASH,
                 connection=connection_type,
@@ -656,7 +656,7 @@ async def main():
                 timeout=connection_timeout,
                 retry_delay=1,
                 auto_reconnect=True,
-                sequential_updates=False,
+                sequential_updates=True,
                 flood_sleep_threshold=60
             )
             

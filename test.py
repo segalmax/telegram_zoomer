@@ -27,6 +27,7 @@ from dotenv import load_dotenv
 import openai
 from pathlib import Path
 import json
+import app.bot
 from app.translator import get_openai_client, translate_text
 from app.image_generator import generate_image_for_post, generate_image_with_stability_ai
 from app.bot import translate_and_post, main as bot_main
@@ -89,6 +90,10 @@ TG_PHONE = os.getenv('TG_PHONE')
 TEST_SRC_CHANNEL = os.getenv('TEST_SRC_CHANNEL')
 TEST_DST_CHANNEL = os.getenv('TEST_DST_CHANNEL')
 
+# Unique identifier for the test run, passed by test_polling_flow.sh
+TEST_RUN_MESSAGE_PREFIX = os.getenv('TEST_RUN_MESSAGE_PREFIX')
+BOT_MODE_TIMEOUT = 60  # Reduced to 60 seconds
+
 # Persistent test session file
 PERSISTENT_TEST_SESSION = "session/test_session_persistent"
 
@@ -98,44 +103,17 @@ os.environ['TEST_SRC_CHANNEL'] = os.getenv('TEST_SRC_CHANNEL', '')
 os.environ['TEST_DST_CHANNEL'] = os.getenv('TEST_DST_CHANNEL', '')
 
 # Ephemeral storage for Heroku - store PTS in environment variable
-def save_heroku_pts(channel_username, pts):
-    """Store PTS in environment variable for Heroku's ephemeral filesystem"""
-    try:
-        # Get existing data if any
-        pts_data = {}
-        if 'CHANNEL_PTS_DATA' in os.environ:
-            pts_data = json.loads(os.environ['CHANNEL_PTS_DATA'])
-        
-        # Update with new value
-        pts_data[channel_username] = pts
-        
-        # Save back to environment
-        os.environ['CHANNEL_PTS_DATA'] = json.dumps(pts_data)
-        logger.debug(f"Saved PTS={pts} for {channel_username} to environment variable")
-    except Exception as e:
-        logger.error(f"Error saving PTS to environment: {e}")
+# MOVED TO app/pts_manager.py
+# def save_heroku_pts(channel_username, pts):
+#     ...
 
-def load_heroku_pts(channel_username):
-    """Load PTS from environment variable for Heroku's ephemeral filesystem"""
-    try:
-        if 'CHANNEL_PTS_DATA' in os.environ:
-            pts_data = json.loads(os.environ['CHANNEL_PTS_DATA'])
-            pts = pts_data.get(channel_username, 0)
-            logger.debug(f"Loaded PTS={pts} for {channel_username} from environment variable")
-            return pts
-    except Exception as e:
-        logger.error(f"Error loading PTS from environment: {e}")
-    
-    return 0
+# def load_heroku_pts(channel_username):
+#     ...
 
 # Patch the pts_manager functions to use environment variables instead of files
-# This makes the bot compatible with Heroku's ephemeral filesystem
-def patch_pts_functions_for_heroku():
-    """Replace the file-based PTS storage with environment variable storage for Heroku"""
-    import app.pts_manager
-    app.pts_manager.save_pts = save_heroku_pts
-    app.pts_manager.load_pts = load_heroku_pts
-    logger.info("Patched PTS storage functions to use environment variables")
+# MOVED TO app/pts_manager.py (auto-patching)
+# def patch_pts_functions_for_heroku():
+#     ...
 
 #
 # API Integration Tests
@@ -499,8 +477,8 @@ async def main():
         # Set TEST_MODE to true
         os.environ['TEST_MODE'] = 'true'
         
-        # Patch PTS storage for Heroku compatibility
-        patch_pts_functions_for_heroku()
+        # Patch PTS storage for Heroku compatibility - NO LONGER NEEDED HERE, auto-patched in pts_manager
+        # patch_pts_functions_for_heroku()
         
         # Create empty sys.argv to avoid parsing errors in bot.py's argparse
         # We'll pass only the arguments that main() in bot.py can handle
@@ -513,17 +491,64 @@ async def main():
             os.environ['GENERATE_IMAGES'] = 'false'
             logger.info("Image generation disabled for bot mode")
         
-        # Add --process-recent if specified
+        # Add --process-recent if specified (though not typical for polling test)
         if hasattr(args, 'process_recent') and args.process_recent:
             sys.argv.append('--process-recent')
             sys.argv.append(str(args.process_recent))
 
-        # Run the actual bot's main function
+        # Create a shared event to signal message processing
+        message_processed_event = asyncio.Event()
+        original_translate_and_post = app.bot.translate_and_post
+
+        async def wrapped_translate_and_post(client, txt, message_id=None, destination_channel=None):
+            # Check if the processed message is the one we are waiting for
+            if TEST_RUN_MESSAGE_PREFIX and TEST_RUN_MESSAGE_PREFIX in txt:
+                logger.info(f"✅ BOT_MODE: Successfully processed test message with prefix: {TEST_RUN_MESSAGE_PREFIX}")
+                message_processed_event.set() # Signal that the message was processed
+            return await original_translate_and_post(client, txt, message_id, destination_channel)
+
+        # Patch translate_and_post
+        app.bot.translate_and_post = wrapped_translate_and_post
+
+        # Run the actual bot's main function, but with a timeout
         try:
-            return await bot_main()
+            logger.info(f"BOT_MODE: Waiting for message with prefix {TEST_RUN_MESSAGE_PREFIX} for up to {BOT_MODE_TIMEOUT} seconds.")
+            main_bot_task = asyncio.create_task(bot_main())
+            # Wait for either the bot to finish or the message_processed_event to be set, or timeout
+            done, pending = await asyncio.wait(
+                [main_bot_task, asyncio.create_task(message_processed_event.wait())],
+                timeout=BOT_MODE_TIMEOUT,
+                return_when=asyncio.FIRST_COMPLETED
+            )
+
+            if message_processed_event.is_set():
+                logger.info("BOT_MODE: Test message processed successfully.")
+                # Cancel the main bot task if it's still running
+                if not main_bot_task.done():
+                    main_bot_task.cancel()
+                return True # Success
+            
+            # Check if main_bot_task completed for other reasons (e.g. error)
+            for task in done:
+                if task == main_bot_task and task.done() and task.exception():
+                    logger.error(f"BOT_MODE: bot_main task failed: {task.exception()}")
+                    return False # Failure
+
+            logger.error(f"BOT_MODE: Timed out after {BOT_MODE_TIMEOUT} seconds waiting for message: {TEST_RUN_MESSAGE_PREFIX}.")
+            if not main_bot_task.done():
+                main_bot_task.cancel()
+            return False # Failure (timeout)
+            
+        except asyncio.CancelledError:
+            logger.info("BOT_MODE: Main bot task was cancelled.")
+            return message_processed_event.is_set() # Return true if event was set before cancellation
+        except Exception as e:
+            logger.error(f"BOT_MODE: Error running bot_main: {e}", exc_info=True)
+            return False
         finally:
-            # Restore original argv
+            # Restore original argv and translate_and_post
             sys.argv = original_argv
+            app.bot.translate_and_post = original_translate_and_post
             
             # Restore original environment variables if they existed
             if original_src:
