@@ -47,7 +47,10 @@ load_dotenv(dotenv_path=project_root / '.env', override=False)
 API_ID = os.getenv('API_ID')
 API_HASH = os.getenv('API_HASH')
 PHONE = os.getenv('PHONE') or os.getenv('TG_PHONE')  # Check both variable names
-SESSION_PATH = os.getenv('TG_SESSION', 'session/nyt_zoomer')
+
+# Check if running on Heroku
+IS_HEROKU = os.getenv('DYNO') is not None
+
 SRC_CHANNEL = os.getenv('SRC_CHANNEL')
 DST_CHANNEL = os.getenv('DST_CHANNEL')
 TRANSLATION_STYLE = os.getenv('TRANSLATION_STYLE', 'right')  # right only by default
@@ -68,6 +71,14 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger('app.bot')
+
+# Use different session paths for Heroku vs local development
+if IS_HEROKU:
+    SESSION_PATH = os.getenv('TG_SESSION', 'session/heroku_bot_session')
+    logger.info(f"Running on Heroku, using session path: {SESSION_PATH}")
+else:
+    SESSION_PATH = os.getenv('TG_SESSION', 'session/local_bot_session')
+    logger.info(f"Running locally, using session path: {SESSION_PATH}")
 
 # Check for TEST_SRC_CHANNEL and TEST_DST_CHANNEL environment variables
 # This helps us switch to test mode when running tests
@@ -109,7 +120,7 @@ else:
     logger.error("OPENAI_API_KEY not found. OpenAI related functions will fail.")
     # Decide if this is fatal or if bot can run without OpenAI (e.g. only relaying)
 
-async def translate_and_post(client_instance, txt, message_id=None, destination_channel=None):
+async def translate_and_post(client_instance, txt, message_id=None, destination_channel=None, message_entity_urls=None):
     # Renamed client to client_instance to avoid conflict with openai_client module
     try:
         start_time = time.time()
@@ -141,8 +152,18 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
         elif not openai_client and generate_images:
             logger.warning("Image generation is enabled, but OpenAI client is not initialized (missing API key?).")
 
-        # Always include source attribution, even when URL is not available
-        source_footer = f"\n\n🔗 Оригинал: {extract_nytimes_link(txt)}" if extract_nytimes_link(txt) else "\n\n🔗 Оригинал: Unknown source"
+        # Get the original message link format: https://t.me/c/CHANNEL_ID/MESSAGE_ID
+        # or for public channels: https://t.me/CHANNEL_NAME/MESSAGE_ID
+        message_link = f"https://t.me/{SRC_CHANNEL.replace('@', '')}/{message_id}" if message_id else "Unknown source"
+        logger.info(f"Original message link: {message_link}")
+
+        # Include both the original message link and any extracted URLs from message entities
+        source_footer = f"\n\n🔗 Оригинал: {message_link}"
+        
+        # Add extracted links from message entities if available
+        if message_entity_urls and len(message_entity_urls) > 0:
+            source_footer += f"\n🔗 Ссылка из статьи: {message_entity_urls[0]}"
+            logger.info(f"Including extracted URL from message: {message_entity_urls[0]}")
         
         async def send_message_parts(channel, text_content, image_file=None, image_url_link=None):
             if image_file:
@@ -160,36 +181,36 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
             else:
                 await client_instance.send_message(channel, text_content)
 
-        # Use only RIGHT style - much simpler logic
+        # Get translation style from environment (default to 'both')
+        translation_style = os.getenv("TRANSLATION_STYLE", "both").lower()
+
         # Check for OpenAI client *before* attempting to translate
         if not openai_client:
             logger.error("Cannot translate without OpenAI client.")
             return False
         
-        # Only support right style
-        logger.info("Translating in RIGHT-BIDLO style...")
-        translated_text = await translate_text(openai_client, txt, 'right')
+        # Append links information to the original text for context
+        translation_context = txt
+        if message_entity_urls and len(message_entity_urls) > 0:
+            translation_context += f"\n\nNote: This message contains a link: {message_entity_urls[0]}"
         
-        # Combine header with translated content instead of sending separately
-        full_content = f"🔴 RIGHT-BIDLO VERSION:\n\n{translated_text}"
-        await send_message_parts(dst_channel_to_use, full_content, image_data, image_url_str)
-        logger.info(f"Posted right-bidlo version")
+        if translation_style == 'right' or translation_style == 'both':
+            logger.info("Translating in RIGHT-BIDLO style...")
+            translated_text = await translate_text(openai_client, translation_context, 'right')
+            
+            # Combine header with translated content instead of sending separately
+            right_content = f"🔴 RIGHT-BIDLO VERSION:\n\n{translated_text}{source_footer}"
+            await send_message_parts(dst_channel_to_use, right_content, image_data, image_url_str)
+            logger.info(f"Posted right-bidlo version")
         
-        # Store the message ID and timestamp for recovery after restarts
-        # This responsibility is moved to the caller (e.g., poll_big_channel or handle_new_message)
-        # if message_id is not None:
-        #     try:
-        #         message = await client_instance.get_messages(SRC_CHANNEL, ids=message_id)
-        #         if message and hasattr(message, 'date'):
-        #             # OLD: save_last_processed_state(message_id, message.date)
-        #             pass # State saving handled by caller
-        #         else:
-        #             # OLD: save_last_processed_state(message_id, datetime.now())
-        #             pass # State saving handled by caller
-        #     except Exception as e:
-        #         logger.warning(f"Could not get message date for ID {message_id}: {e}")
-        #         # OLD: save_last_processed_state(message_id, datetime.now())
-        #         pass # State saving handled by caller
+        if translation_style == 'left' or translation_style == 'both':
+            logger.info("Translating in LEFT-ZOOMER style...")
+            translated_text = await translate_text(openai_client, translation_context, 'left')
+            
+            # Combine header with translated content
+            left_content = f"🔵 LEFT-ZOOMER VERSION:\n\n{translated_text}{source_footer}"
+            await send_message_parts(dst_channel_to_use, left_content, None, None)
+            logger.info(f"Posted left-zoomer version")
         
         logger.info(f"Total processing time for message: {time.time() - start_time:.2f} seconds")
         return True
@@ -205,7 +226,33 @@ async def setup_event_handlers(client_instance):
             txt = event.message.message
             if not txt: return
             logger.info(f"Processing new message ID {event.message.id}: {txt[:50]}...")
-            success = await translate_and_post(client_instance, txt, event.message.id)
+            
+            # Extract URLs from message entities
+            message_entity_urls = []
+            if hasattr(event.message, 'entities') and event.message.entities:
+                for entity in event.message.entities:
+                    if hasattr(entity, 'url') and entity.url:
+                        # Entity already has URL property
+                        message_entity_urls.append(entity.url)
+                        logger.info(f"Found URL entity with direct URL: {entity.url}")
+                    elif hasattr(entity, '_') and entity._ == 'MessageEntityTextUrl':
+                        # TextUrl entity type
+                        if hasattr(entity, 'url'):
+                            message_entity_urls.append(entity.url)
+                            logger.info(f"Found TextUrl entity: {entity.url}")
+                    elif hasattr(entity, '_') and entity._ in ('MessageEntityUrl', 'MessageEntityTextUrl'):
+                        # Extract URL from the message text using offset and length
+                        if hasattr(entity, 'offset') and hasattr(entity, 'length'):
+                            url_text = txt[entity.offset:entity.offset + entity.length]
+                            if url_text.startswith('http'):
+                                message_entity_urls.append(url_text)
+                                logger.info(f"Extracted URL from text: {url_text}")
+                            else:
+                                logger.info(f"Found URL-like entity but not a valid URL: {url_text}")
+            
+            logger.info(f"Extracted URLs from message: {message_entity_urls}")
+            
+            success = await translate_and_post(client_instance, txt, event.message.id, message_entity_urls=message_entity_urls)
             if success:
                 current_state = load_app_state()
                 current_state['message_id'] = event.message.id
@@ -241,10 +288,36 @@ async def process_recent_posts(client_instance, limit=10, timeout=300):
                 logger.warning("Approaching timeout, stopping batch processing.")
                 break
             logger.info(f"Processing message {msg.id}: {msg.text[:50]}...")
+            
+            # Extract URLs from message entities
+            message_entity_urls = []
+            if hasattr(msg, 'entities') and msg.entities:
+                for entity in msg.entities:
+                    if hasattr(entity, 'url') and entity.url:
+                        # Entity already has URL property
+                        message_entity_urls.append(entity.url)
+                        logger.info(f"Found URL entity with direct URL: {entity.url}")
+                    elif hasattr(entity, '_') and entity._ == 'MessageEntityTextUrl':
+                        # TextUrl entity type
+                        if hasattr(entity, 'url'):
+                            message_entity_urls.append(entity.url)
+                            logger.info(f"Found TextUrl entity: {entity.url}")
+                    elif hasattr(entity, '_') and entity._ in ('MessageEntityUrl', 'MessageEntityTextUrl'):
+                        # Extract URL from the message text using offset and length
+                        if hasattr(entity, 'offset') and hasattr(entity, 'length'):
+                            url_text = msg.text[entity.offset:entity.offset + entity.length]
+                            if url_text.startswith('http'):
+                                message_entity_urls.append(url_text)
+                                logger.info(f"Extracted URL from text: {url_text}")
+                            else:
+                                logger.info(f"Found URL-like entity but not a valid URL: {url_text}")
+            
+            logger.info(f"Extracted URLs from message: {message_entity_urls}")
+            
             processing_msg_timeout = min(180, (timeout - (time.time() - start_time)) / (len(messages) - processed_count + 1))
             try:
                 success = await asyncio.wait_for(
-                    translate_and_post(client_instance, msg.text, msg.id),
+                    translate_and_post(client_instance, msg.text, msg.id, message_entity_urls=message_entity_urls),
                     timeout=processing_msg_timeout
                 )
                 if success: processed_count += 1
@@ -292,13 +365,6 @@ async def ping_server(client_instance):
             await asyncio.sleep(60) 
         await asyncio.sleep(300) # 5 minutes
 
-def extract_nytimes_link(text):
-    if not text: return None
-    
-    # Let the LLM handle URL extraction for more flexibility
-    # The link will be included naturally in the translations based on our prompt
-    return None
-
 async def process_recent_messages(client, count):
     """Process a specified number of recent messages from source channel"""
     try:
@@ -311,9 +377,21 @@ async def process_recent_messages(client, count):
         for msg in reversed(messages):
             if not msg.text:
                 continue
-                
+            
+            # Extract URLs from message entities
+            message_entity_urls = []
+            if hasattr(msg, 'entities') and msg.entities:
+                for entity in msg.entities:
+                    if hasattr(entity, 'url') and entity.url:
+                        message_entity_urls.append(entity.url)
+                    elif hasattr(entity, '_') and entity._ in ('MessageEntityUrl', 'MessageEntityTextUrl'):
+                        if hasattr(entity, 'offset') and hasattr(entity, 'length'):
+                            url_text = msg.text[entity.offset:entity.offset + entity.length]
+                            if url_text.startswith('http'):
+                                message_entity_urls.append(url_text)
+            
             logger.info(f"Processing message ID: {msg.id}")
-            await translate_and_post(client, msg.text, msg.id)
+            await translate_and_post(client, msg.text, msg.id, message_entity_urls=message_entity_urls)
             
             # Add a short delay between processing messages
             await asyncio.sleep(1)
@@ -395,8 +473,20 @@ async def background_update_checker(client):
                                 break
                                 
                         if not already_processed:
+                            # Extract URLs from message entities
+                            message_entity_urls = []
+                            if hasattr(msg, 'entities') and msg.entities:
+                                for entity in msg.entities:
+                                    if hasattr(entity, 'url') and entity.url:
+                                        message_entity_urls.append(entity.url)
+                                    elif hasattr(entity, '_') and entity._ in ('MessageEntityUrl', 'MessageEntityTextUrl'):
+                                        if hasattr(entity, 'offset') and hasattr(entity, 'length'):
+                                            url_text = msg.text[entity.offset:entity.offset + entity.length]
+                                            if url_text.startswith('http'):
+                                                message_entity_urls.append(url_text)
+                            
                             logger.info(f"Processing potentially missed message ID: {msg.id}")
-                            await translate_and_post(client, msg.text, msg.id)
+                            await translate_and_post(client, msg.text, msg.id, message_entity_urls=message_entity_urls)
                 
                 # Update last check time
                 last_check_time = now
@@ -445,8 +535,20 @@ async def background_channel_poller(client):
                 # Process any new messages found
                 for new_msg in getattr(diff, 'new_messages', []):
                     if hasattr(new_msg, 'message') and new_msg.message:
+                        # Extract URLs from message entities
+                        message_entity_urls = []
+                        if hasattr(new_msg, 'entities') and new_msg.entities:
+                            for entity in new_msg.entities:
+                                if hasattr(entity, 'url') and entity.url:
+                                    message_entity_urls.append(entity.url)
+                                elif hasattr(entity, '_') and entity._ in ('MessageEntityUrl', 'MessageEntityTextUrl'):
+                                    if hasattr(entity, 'offset') and hasattr(entity, 'length'):
+                                        url_text = new_msg.message[entity.offset:entity.offset + entity.length]
+                                        if url_text.startswith('http'):
+                                            message_entity_urls.append(url_text)
+                        
                         logger.info(f"Processing newly discovered message from poll: {new_msg.id}")
-                        await translate_and_post(client, new_msg.message, new_msg.id)
+                        await translate_and_post(client, new_msg.message, new_msg.id, message_entity_urls=message_entity_urls)
                         
                 first_run = False  # Successfully completed a poll
                 
@@ -487,344 +589,203 @@ async def poll_big_channel(client, channel_username):
         current_app_state = load_app_state()
         last_pts = current_app_state.get('pts', 0)
         if last_pts == 0:
-            logger.info(f"No previous PTS found for channel {entity.id}, starting from latest state.")
-            # Get current PTS state if starting from scratch
             try:
-                # Attempt to get current state to initialize PTS correctly
-                # This is a common pattern to get the initial PTS for a channel.
-                # We fetch no messages (limit=0) just to get the current pts from the state.
-                initial_diff = await client(GetChannelDifferenceRequest(
-                    channel=input_channel,
-                    filter=ChannelMessagesFilterEmpty(), # No specific filter, just want state
-                    pts=1, # Smallest possible PTS to ensure we get current state
-                    limit=0 # Don't need messages, just the state object for its PTS
-                ))
-                if hasattr(initial_diff, 'pts'):
-                    last_pts = initial_diff.pts
-                    current_app_state['pts'] = last_pts
-                    current_app_state['channel_id'] = entity.id # Store channel ID if not already there
-                    save_app_state(current_app_state)
-                    logger.info(f"Initialized PTS for channel {entity.id} to {last_pts}.")
-                elif hasattr(initial_diff, 'new_messages') and not initial_diff.new_messages and hasattr(initial_diff, 'final') and initial_diff.final:
-                    # This might be a ChannelDifferenceEmpty, meaning we are up to date, PTS is in other_updates or not needed.
-                    # Or it could be ChannelDifferenceTooLong. If too long, we need to fetch initial messages.
-                    logger.info("Initial GetChannelDifference returned empty or final state. Assuming up-to-date or will catch up.")
-                    # If it was ChannelDifferenceTooLong, the next loop iteration will handle it.
-                    # For safety, ensure last_pts is not 0 if we can find a message
-                    async for m in client.iter_messages(input_channel, limit=1):
-                        if m and hasattr(m, 'pts'): 
-                            last_pts = m.pts 
-                            current_app_state['pts'] = last_pts
-                            save_app_state(current_app_state)
-                            logger.info(f"Set initial PTS from latest message: {last_pts}")
-                        break # only need one
-                    if last_pts == 0: # if channel is empty or no pts on message
-                        last_pts = 1 # Start with 1 if truly nothing found
-                        logger.warning("Could not determine initial PTS, starting with 1. This might re-process if channel is very old & empty.")
-
-            except Exception as e:
-                logger.error(f"Error getting initial PTS for {channel_username}: {e}. Will use last known PTS or 0.")
-        
-        logger.info(f"Initial PTS for channel {entity.id}: {last_pts}")
-
-    except ValueError as e:
-        logger.error(f"Channel {channel_username} not found or invalid: {e}")
-        return
-    except Exception as e:
-        logger.error(f"Error setting up poller for {channel_username}: {e}", exc_info=True)
-        return
-
-    max_retries = 5
-    retry_delay = 10  # seconds
-
-    while True:
-        retries = 0
-        processed_messages_in_cycle = 0
-        try:
-            logger.debug(f"Polling {channel_username} (ID: {entity.id}) with PTS: {last_pts}")
-            
-            # Get updates (difference) since the last PTS
-            # Limit can be adjusted; 100 is a common default.
-            difference = await client(GetChannelDifferenceRequest(
-                channel=input_channel,
-                filter=ChannelMessagesFilterEmpty(), # No specific filter, interested in all new messages
-                pts=last_pts,
-                limit=100  # Max messages to fetch per request
-            ))
-
-            # Process the difference object
-            if hasattr(difference, 'new_messages') and difference.new_messages:
-                logger.info(f"Found {len(difference.new_messages)} new messages in {channel_username}.")
-                # Sort messages by date/ID to process in order
-                sorted_messages = sorted(difference.new_messages, key=lambda m: (m.date, m.id))
-                
-                for message in sorted_messages:
-                    if not hasattr(message, 'message') or not message.message: # Skip non-text or empty messages
-                        if hasattr(message, 'pts') and message.pts:
-                            last_pts = message.pts # Update PTS even for skipped messages
-                        continue
-
-                    txt_to_process = message.message
-                    logger.info(f"Processing message ID {message.id} from {channel_username}: {txt_to_process[:50]}...")
+                # If PTS is not available, get latest message
+                logger.info("No PTS available in app state for this channel. Getting latest message...")
+                messages = await client.get_messages(channel_username, limit=1)
+                if messages and len(messages) > 0:
+                    msg = messages[0]
+                    logger.info(f"Latest message ID: {msg.id}")
                     
-                    success = await translate_and_post(client, txt_to_process, message.id, DST_CHANNEL)
-                    if success:
-                        processed_messages_in_cycle += 1
-                        current_app_state = load_app_state() # Reload state before updating
-                        current_app_state['message_id'] = message.id
-                        current_app_state['timestamp'] = message.date.isoformat()
-                        if hasattr(message, 'pts') and message.pts: # Update PTS from message if available
-                            last_pts = message.pts 
-                            current_app_state['pts'] = last_pts
-                        # Also update channel_id if it's missing, though it should be set by now
-                        if 'channel_id' not in current_app_state or not current_app_state['channel_id']:
-                            current_app_state['channel_id'] = entity.id
+                    # Extract URLs from message entities
+                    message_entity_urls = []
+                    if hasattr(msg, 'entities') and msg.entities:
+                        for entity in msg.entities:
+                            if hasattr(entity, 'url') and entity.url:
+                                message_entity_urls.append(entity.url)
+                            elif hasattr(entity, '_') and entity._ in ('MessageEntityUrl', 'MessageEntityTextUrl'):
+                                if hasattr(entity, 'offset') and hasattr(entity, 'length'):
+                                    url_text = msg.text[entity.offset:entity.offset + entity.length]
+                                    if url_text.startswith('http'):
+                                        message_entity_urls.append(url_text)
+                    
+                    # Process this latest message if it has text
+                    if msg.text:
+                        await translate_and_post(client, msg.text, msg.id, message_entity_urls=message_entity_urls)
+                    
+                    # Try to get the dialog to get PTS
+                    dialogs = await client.get_dialogs()
+                    for dialog in dialogs:
+                        if hasattr(dialog, 'entity') and hasattr(dialog.entity, 'id') and dialog.entity.id == entity.id:
+                            if hasattr(dialog, 'dialog') and hasattr(dialog.dialog, 'pts'):
+                                initial_pts = dialog.dialog.pts
+                                logger.info(f"Got initial PTS {initial_pts} from dialog")
+                                last_pts = initial_pts
+                                # Update app state with this PTS
+                                current_app_state['pts'] = initial_pts
+                                save_app_state(current_app_state)
+                                break
+                else:
+                    logger.warning(f"No messages found in channel {channel_username}")
+            except Exception as e:
+                logger.error(f"Error initializing PTS: {e}")
+        else:
+            logger.info(f"Using PTS from app state: {last_pts}")
+
+        # Main polling loop
+        processing_message = False  # Flag to prevent database locks
+        while True:
+            if processing_message:
+                # If we're currently processing a message, wait before polling again
+                # This helps prevent database locks from concurrent access to the session file
+                await asyncio.sleep(1)
+                continue
+                
+            try:
+                # Get channel difference with current PTS
+                channel_diff = await client(GetChannelDifferenceRequest(
+                    channel=input_channel,
+                    filter=ChannelMessagesFilterEmpty(),
+                    pts=last_pts,
+                    limit=100
+                ))
+                
+                # Update PTS from response
+                if hasattr(channel_diff, 'pts'):
+                    new_pts = channel_diff.pts
+                    logger.info(f"Channel difference PTS: {new_pts}")
+                    
+                    # Only update app state if PTS changed
+                    if new_pts != last_pts:
+                        last_pts = new_pts
+                        current_app_state['pts'] = new_pts
                         save_app_state(current_app_state)
-                        logger.info(f"App state updated. Last processed ID: {message.id}, New PTS for {entity.id}: {last_pts}")
-                    else:
-                        logger.warning(f"Failed to process message ID {message.id} from {channel_username}. It might be retried if PTS doesn't advance.")
-                        # If processing fails, we might not want to advance PTS past this message
-                        # or implement a more robust retry/skip mechanism.
-                        # For now, PTS will be updated from the GetChannelDifference result's PTS later.
-
-            # Update PTS from the difference object itself (this is the most reliable PTS)
-            if hasattr(difference, 'pts'):
-                if difference.pts > last_pts:
-                    logger.info(f"Updating PTS for channel {entity.id} from {last_pts} to {difference.pts} (from GetChannelDifference response)")
-                    last_pts = difference.pts
-                    # Save the new PTS immediately
-                    current_app_state = load_app_state()
-                    current_app_state['pts'] = last_pts
-                    current_app_state['channel_id'] = entity.id # Ensure channel_id is also persisted with PTS
-                    save_app_state(current_app_state)
-                elif difference.pts < last_pts:
-                    logger.warning(f"PTS from GetChannelDifference ({difference.pts}) is less than current PTS ({last_pts}). This should not happen. Not updating PTS.")
-            elif hasattr(difference, 'intermediate_state') and hasattr(difference.intermediate_state, 'pts'): # For ChannelDifference
-                 if difference.intermediate_state.pts > last_pts:
-                    logger.info(f"Updating PTS for channel {entity.id} from {last_pts} to {difference.intermediate_state.pts} (from ChannelDifference intermediate_state)")
-                    last_pts = difference.intermediate_state.pts
-                    current_app_state = load_app_state()
-                    current_app_state['pts'] = last_pts
-                    current_app_state['channel_id'] = entity.id
-                    save_app_state(current_app_state)
-            # No new messages and PTS is the same means we are up to date for this slice
-            elif not hasattr(difference, 'new_messages') or not difference.new_messages:
-                logger.debug(f"No new messages in {channel_username} for PTS {last_pts}.")
-            
-            # Handle ChannelDifferenceTooLong: we need to fetch messages iteratively
-            # This basic poller might not fully handle ChannelDifferenceTooLong if it means there are more than 'limit' messages
-            # A robust solution for TooLong might involve fetching messages until caught up before relying on GetChannelDifference again.
-            # However, Telethon's GetChannelDifference is meant to handle this by returning a state from which to continue.
-            # If difference.final is False and there are other_updates, it means there's more to fetch.
-            if hasattr(difference, 'final') and not difference.final and (hasattr(difference, 'other_updates') and difference.other_updates):
-                 logger.info(f"More updates available for {channel_username} (final=false). Continuing polling immediately.")
-                 # No sleep, continue to fetch next batch
-                 continue 
-
-            if processed_messages_in_cycle == 0:
-                 logger.debug(f"No messages processed in this cycle for {channel_username}.")
-            
-            # Wait before the next poll
-            await asyncio.sleep(MANUAL_POLL_INTERVAL) 
-            retries = 0 # Reset retries on successful poll
-
-        except ConnectionError as e:
-            retries += 1
-            logger.error(f"Connection error polling {channel_username} (attempt {retries}/{max_retries}): {e}")
-            if retries >= max_retries:
-                logger.error(f"Max retries reached for {channel_username}. Stopping polling for this channel.")
-                # Consider a mechanism to restart the bot or this specific task after a longer delay
-                # For now, this task will exit.
-                break 
-            logger.info(f"Retrying in {retry_delay} seconds...")
-            await asyncio.sleep(retry_delay)
-            # Attempt to reconnect before next retry
-            if not client.is_connected():
-                try:
-                    logger.info("Attempting to reconnect client...")
-                    await client.connect()
-                    if await client.is_connected():
-                        logger.info("Client reconnected successfully.")
-                    else:
-                        logger.error("Failed to reconnect client.")
-                        # If reconnect fails, it might be better to let the main loop handle this or exit.
-                except Exception as ce:
-                    logger.error(f"Exception during reconnection attempt: {ce}")
-        
-        except Exception as e:
-            logger.error(f"An unexpected error occurred in poll_big_channel for {channel_username}: {e}", exc_info=True)
-            # General error, wait and retry
-            await asyncio.sleep(MANUAL_POLL_INTERVAL * 2) # Longer delay for unexpected errors
+                
+                # Process new messages
+                if hasattr(channel_diff, 'new_messages'):
+                    logger.info(f"Channel difference returned {len(channel_diff.new_messages)} new messages")
+                    for msg in channel_diff.new_messages:
+                        if hasattr(msg, 'message') and msg.message:
+                            logger.info(f"Processing new message ID: {msg.id}")
+                            processing_message = True
+                            
+                            # Extract URLs from message entities
+                            message_entity_urls = []
+                            if hasattr(msg, 'entities') and msg.entities:
+                                for entity in msg.entities:
+                                    if hasattr(entity, 'url') and entity.url:
+                                        message_entity_urls.append(entity.url)
+                                    elif hasattr(entity, '_') and entity._ in ('MessageEntityUrl', 'MessageEntityTextUrl'):
+                                        if hasattr(entity, 'offset') and hasattr(entity, 'length'):
+                                            url_text = msg.message[entity.offset:entity.offset + entity.length]
+                                            if url_text.startswith('http'):
+                                                message_entity_urls.append(url_text)
+                            
+                            # Process the message
+                            await translate_and_post(client, msg.message, msg.id, message_entity_urls=message_entity_urls)
+                            processing_message = False
+                
+                # Use recommended timeout or default interval
+                timeout = getattr(channel_diff, 'timeout', MANUAL_POLL_INTERVAL)
+                await asyncio.sleep(timeout)
+                
+            except Exception as e:
+                processing_message = False
+                if "database is locked" in str(e).lower():
+                    logger.warning(f"Database lock detected in poll_big_channel, sleeping longer: {e}")
+                    await asyncio.sleep(120)  # Sleep longer to let locks clear
+                else:
+                    logger.error(f"Error in poll_big_channel: {e}", exc_info=True)
+                    await asyncio.sleep(30)
+    except Exception as e:
+        logger.error(f"Fatal error in poll_big_channel: {e}", exc_info=True)
 
 async def main():
-    """Main function to run the bot"""
-    # Check if required environment variables are set
-    if not all([API_ID, API_HASH, PHONE, SRC_CHANNEL, DST_CHANNEL]):
-        logger.error("Missing required environment variables")
-        for var in ['API_ID', 'API_HASH', 'PHONE', 'SRC_CHANNEL', 'DST_CHANNEL']:
-            if not globals()[var]:
-                logger.error(f"Missing {var}")
-        return False
-    
-    # Create directories if they don't exist
-    session_dir = Path(SESSION_PATH).parent
-    session_dir.mkdir(exist_ok=True)
-    
-    # Parse command line arguments first to handle process-recent
-    parser = argparse.ArgumentParser(description='Telegram Zoomer Bot')
-    parser.add_argument('--process-recent', type=int, help='Process N recent messages from the source channel')
-    parser.add_argument('--timeout', type=int, default=30, help='Connection timeout in seconds')
+    """
+    Main entry point for the Zoomer Bot.
+    Sets up Telegram client, event handlers, and starts the client.
+    """
+    parser = argparse.ArgumentParser(description='Telegram Zoomer Bot - Translate messages with Artemiy Lebedev style')
+    parser.add_argument('--process-recent', type=int, help='Process the specified number of recent messages')
     args = parser.parse_args()
     
-    # Set timeout from arguments or default
-    connection_timeout = args.timeout if args.timeout else 30
-    logger.info(f"Using connection timeout of {connection_timeout} seconds")
-    
-    # Set up connection parameters with fallbacks
-    connection_types = [ConnectionTcpAbridged, ConnectionTcpIntermediate, ConnectionTcpFull]
-    
-    # Try different connection types until one works
-    client = None
-    connected = False
-    
-    for connection_type in connection_types:
-        connection_name = connection_type.__name__
-        logger.info(f"Trying connection type: {connection_name}")
-        
-        # Create a new client with this connection type
-        try:
-            # Use a custom connection with configurable parameters
-            client = TelegramClient(
-                SESSION_PATH,
-                API_ID, 
-                API_HASH,
-                connection=connection_type,
-                use_ipv6=False,
-                timeout=connection_timeout,
-                retry_delay=1,
-                auto_reconnect=True,
-                sequential_updates=True,
-                flood_sleep_threshold=60
-            )
-    
-            # Try to connect with timeout
-            logger.info(f"Connecting with timeout {connection_timeout}s...")
-            try:
-                # Use asyncio.wait_for to enforce a timeout
-                await asyncio.wait_for(
-                    client.connect(),
-                    timeout=connection_timeout
-                )
-            except asyncio.TimeoutError:
-                logger.warning(f"Connection timed out after {connection_timeout}s")
-                if client: await client.disconnect()
-                continue
-            except Exception as e:
-                logger.warning(f"Connection error: {str(e)}")
-                if client: await client.disconnect()
-                continue
-            
-            # Check if connection succeeded
-            if client.is_connected():
-                logger.info("Successfully connected to Telegram")
-                connected = True
-                break
-            else:
-                logger.warning("Failed to connect")
-                if client: await client.disconnect()
-                
-        except Exception as e:
-            logger.warning(f"Error setting up connection: {str(e)}")
-            if client: 
-                try: await client.disconnect()
-                except: pass
-    
-    # If we couldn't connect with any method, exit
-    if not connected or not client:
-        logger.error("Failed to connect to Telegram with any connection method. Please check your network.")
-        return False # Indicate failure to the caller, or sys.exit(1) if main is run directly always
-    
-    # Check authorization. On Heroku, we MUST be authorized by the session string.
-    # No interactive authentication should be attempted.
     try:
-        if not await client.is_user_authorized():
-            logger.critical(
-                "Telegram client is NOT AUTHORIZED. This usually means the session string provided via "
-                "TG_COMPRESSED_SESSION_STRING is missing, invalid, or expired. "
-                "Please run 'create_heroku_session.py' locally to generate a new session, "
-                "then update the TG_COMPRESSED_SESSION_STRING environment variable on Heroku "
-                "(e.g., by re-running 'setup_heroku.sh'). Exiting."
-            )
-            await client.disconnect()
-            return False # Indicate failure
+        # Initialize OpenAI client
+        global openai_client
+        openai_api_key = os.getenv('OPENAI_API_KEY')
+        if openai_api_key:
+            openai_client = get_openai_client(openai_api_key)
         else:
-            logger.info("Successfully authenticated using session provided by environment variable.")
-    except Exception as e:
-        logger.error(f"Error during authorization check: {str(e)}. This might indicate a problem with the session or connection. Exiting.", exc_info=True)
-        if client and client.is_connected():
-            await client.disconnect()
-        return False # Indicate failure
-    
-    logger.info("Client started successfully and is authorized.")
-    
-    # Handle the --process-recent argument
-    if args.process_recent:
-        success = await process_recent_messages(client, args.process_recent)
-        await client.disconnect()
-        return success
-    
-    # Register event handler for new messages
-    @client.on(events.NewMessage(chats=SRC_CHANNEL))
-    async def handler(event):
-        logger.info(f"New message event received from {SRC_CHANNEL}, ID: {event.message.id}")
-        await translate_and_post(client, event.message.text, event.message.id)
-    
-    # Start the proper megachannel polling task
-    asyncio.create_task(poll_big_channel(client, SRC_CHANNEL))
-    
-    logger.info(f"Bot is now running, listening to {SRC_CHANNEL}")
-    logger.info(f"Translation style: {TRANSLATION_STYLE}")
-    logger.info(f"Image generation: {'Enabled' if GENERATE_IMAGES else 'Disabled'}")
-    
-    # Force initial catch up to ensure we're getting updates
-    try:
-        await asyncio.wait_for(client.catch_up(), timeout=30)
-        logger.info("Initial catch-up completed")
-    except asyncio.TimeoutError:
-        logger.warning("Initial catch-up timed out, continuing anyway")
-    except Exception as e:
-        logger.warning(f"Error during initial catch-up: {e}, continuing anyway")
-    
-    # Check for missed messages during downtime
-    try:
-        state = load_app_state()
-        if state and state.get("message_id", 0) > 0:
-            logger.info(f"Checking for missed messages since last processed message ID: {state.get('message_id')}")
+            logger.warning("No OpenAI API key found. Image generation and translation will be disabled.")
+        
+        # Create Telegram client
+        logger.info(f"Creating Telegram client with session: {SESSION}")
+        client = TelegramClient(
+            SESSION,
+            int(API_ID), 
+            API_HASH,
+            connection=ConnectionTcpAbridged
+        )
+        
+        # Set up event handler
+        @client.on(events.NewMessage(chats=SRC_CHANNEL))
+        async def handler(event):
+            txt = event.message.text
+            if not txt: return
+            logger.info(f"Received new message: {txt[:50]}...")
             
-            # Get messages newer than our last processed message
-            messages = await client.get_messages(
-                SRC_CHANNEL,
-                min_id=state.get("message_id"),
-                limit=10
-            )
+            # Extract URLs from message entities
+            message_entity_urls = []
+            if hasattr(event.message, 'entities') and event.message.entities:
+                for entity in event.message.entities:
+                    if hasattr(entity, 'url') and entity.url:
+                        message_entity_urls.append(entity.url)
+                    elif hasattr(entity, '_') and entity._ in ('MessageEntityUrl', 'MessageEntityTextUrl'):
+                        if hasattr(entity, 'offset') and hasattr(entity, 'length'):
+                            url_text = txt[entity.offset:entity.offset + entity.length]
+                            if url_text.startswith('http'):
+                                message_entity_urls.append(url_text)
             
-            if messages:
-                logger.info(f"Found {len(messages)} potentially missed messages during downtime")
-                # Process them in order from oldest to newest
-                for msg in reversed(messages):
-                    if not msg.text:
-                        continue
-                    logger.info(f"Processing missed message from downtime recovery: ID {msg.id}")
-                    await translate_and_post(client, msg.text, msg.id)
-                    await asyncio.sleep(1)  # Small delay to prevent rate limiting
-            else:
-                logger.info("No missed messages found during downtime")
+            await translate_and_post(client, event.message.text, event.message.id, message_entity_urls=message_entity_urls)
+        
+        # Connect to Telegram
+        logger.info("Starting Telegram client...")
+        await client.start(phone=TG_PHONE)
+        
+        # Process recent messages if requested
+        if args.process_recent and args.process_recent > 0:
+            logger.info(f"Processing {args.process_recent} recent messages")
+            messages = await client.get_messages(SRC_CHANNEL, limit=args.process_recent)
+            
+            # Process each message
+            for msg in reversed(messages):
+                logger.info(f"Processing message ID: {msg.id}")
+                if not msg.text: continue
+                
+                # Extract URLs from message entities
+                message_entity_urls = []
+                if hasattr(msg, 'entities') and msg.entities:
+                    for entity in msg.entities:
+                        if hasattr(entity, 'url') and entity.url:
+                            message_entity_urls.append(entity.url)
+                        elif hasattr(entity, '_') and entity._ in ('MessageEntityUrl', 'MessageEntityTextUrl'):
+                            if hasattr(entity, 'offset') and hasattr(entity, 'length'):
+                                url_text = msg.text[entity.offset:entity.offset + entity.length]
+                                if url_text.startswith('http'):
+                                    message_entity_urls.append(url_text)
+                
+                await translate_and_post(client, msg.text, msg.id, message_entity_urls=message_entity_urls)
+                await asyncio.sleep(2)  # Add delay between processing
+            
+            logger.info("Finished processing recent messages")
+        
+        # Run the client in mega-channel short-poll mode
+        logger.info(f"Client ready, polling channel: {SRC_CHANNEL}")
+        await poll_big_channel(client, SRC_CHANNEL)
+        
     except Exception as e:
-        logger.error(f"Error checking for missed messages: {e}", exc_info=True)
-    
-    # Keep the connection running
-    await client.run_until_disconnected()
-    return True
+        logger.error(f"Fatal error in main: {e}", exc_info=True)
+        sys.exit(1)
 
 if __name__ == "__main__":
     asyncio.run(main()) 

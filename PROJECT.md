@@ -56,8 +56,21 @@
     - [x] **Added input validation for image generation** to properly handle short/test messages
     - [x] **Fixed await for get_peer_id** calls in the test.py to eliminate RuntimeWarnings
     - [x] **Enhanced test robustness** with more descriptive test content that meets APIs' requirements
-    - [x] **Simplified to use only RIGHT-BIDLO translation style** for better clarity and reliability
     - [x] **Improved message formatting** by combining header with content instead of sending separate messages
+    - [x] **Reverted to support both translation styles** (`TRANSLATION_STYLE=both`) for complete functionality
+    - [x] **Implemented gzip compression for session data** to work within Heroku's 64KB config var size limit
+    - [x] **Enhanced environment variable handling** with dual .env file support (`.env` for secrets, `app_settings.env` for settings)
+    - [x] **Improved Heroku deployment script** to handle both .env files and compressed session data
+    - [x] **Enhanced message entity processing** to extract and include links from Telegram messages:
+        - [x] Identifies and extracts URLs from message entity objects
+        - [x] Includes article links in the output alongside the original message link
+        - [x] Added proper testing with Telegram message entities
+        - [x] Updates translator prompts to clarify link handling
+    - [x] **Implemented environment-aware session handling** to prevent session conflicts:
+        - [x] Automatically detects if running on Heroku vs local environment
+        - [x] Uses different session names based on environment
+        - [x] Prevents "used from multiple IP addresses" authentication errors
+        - [x] Allows easy local testing without interfering with production
 - [x] Implement persistent session handling to avoid frequent re-authentication
 - [x] Comprehensive end-to-end automated testing
 - [x] Code cleanup and organization (ongoing)
@@ -77,13 +90,39 @@
 - [x] Background keep-alive processes to maintain Telegram connection
 - [x] End-to-end automated tests with Telegram authentication
 
+## Heroku Deployment Status
+- [x] **Successfully deployed to Heroku**
+- [x] **Compressed Session Handling**: Implemented gzip compression for session string to fit within Heroku's 64KB config var size limit
+  - Session string compressed from ~28KB to ~1KB
+  - Using `TG_COMPRESSED_SESSION_STRING` instead of `TG_SESSION_STRING`
+  - Automatic fallback to uncompressed string if available
+- [x] **Split Environment Configuration**: 
+  - `.env` file for secrets (API keys, auth tokens)
+  - `app_settings.env` for non-secret configuration (channels, features, session path)
+  - Ensures sensitive data remains protected while settings are accessible
+- [x] **Automated Heroku Setup**: Enhanced `setup_heroku.sh` script
+  - Reads both `.env` and `app_settings.env` 
+  - Sets all environment variables in Heroku
+  - Compresses and exports session string
+  - Removes obsolete variables
+- [x] **Environment Loading**: All scripts now load from both config files
+  - First `app_settings.env` with override=True for app settings
+  - Then `.env` with override=False for secrets
+- [x] **Runtime Feature Toggles**: Both `TRANSLATION_STYLE` and `GENERATE_IMAGES` can be changed through environment variables without code changes
+
 ## Heroku / State Persistence Details
-- **Telethon Session**: The core Telegram session file (`.session`) is stored as a Base64 encoded string in the `TG_SESSION_STRING` environment variable. `app.session_manager.setup_session()` recreates the session file from this variable on startup.
+- **Telethon Session**: The core Telegram session file (`.session`) is stored as a compressed Base64 encoded string in the `TG_COMPRESSED_SESSION_STRING` environment variable. 
+  - Uses gzip compression to reduce size from ~28KB to ~1KB for Heroku's 64KB config var limit
+  - `app.session_manager.setup_session()` decompresses and recreates the session file from this variable on startup
+  - Falls back to the older uncompressed `TG_SESSION_STRING` format if `TG_COMPRESSED_SESSION_STRING` is not available
 - **Application State**: Other application state, such as the last processed message ID, timestamp, and PTS (Poll Tracking State) for channel polling, is stored as a Base64 encoded JSON string in the `LAST_PROCESSED_STATE` environment variable.
   - `app.session_manager.load_app_state()` loads this state on startup, falling back to a local `session/app_state.json` file (for local development) or defaults if neither is found.
   - `app.session_manager.save_app_state(state_data)` saves the current state to `session/app_state.json` and also logs the Base64 encoded string that should be set as `LAST_PROCESSED_STATE` on Heroku. This ensures that even if the bot restarts, it can resume from where it left off.
 - **Setup Script**: `setup_heroku.sh` automates setting these (and other) environment variables on Heroku. It uses `export_session.py` to generate the necessary Base64 strings from your local, authenticated session and current application state file.
-- **Obsolete Variables**: `SESSION_DATA`, `CHANNEL_PTS_DATA`, and `USE_ENV_PTS_STORAGE` are now obsolete and should be removed from Heroku config if present. `setup_heroku.sh` attempts to unset them.
+  - Now reads settings from both `.env` (secrets) and `app_settings.env` (non-secrets)
+  - Compresses the session data with gzip before Base64 encoding
+  - Displays compression statistics to verify size reduction
+- **Obsolete Variables**: `SESSION_DATA`, `CHANNEL_PTS_DATA`, `USE_ENV_PTS_STORAGE`, and `TG_SESSION_STRING` are now obsolete and are automatically removed from Heroku config by `setup_heroku.sh`.
 
 ## Future Ideas / Nice-to-Haves (Backlog)
 - [x] More sophisticated image generation prompts:
@@ -322,247 +361,3 @@ FUNCTION handle_new_message(event):
         LOG "Processing new message"
         CALL translate_and_post(client, text, message_id)
 ```
-
-### Translation and Posting Flow
-```
-FUNCTION translate_and_post(client, text, message_id, destination=DEFAULT_DEST):
-    // Image generation (optional)
-    IF image generation enabled AND OpenAI available:
-        image_data = CALL generate_image_for_post(openai_client, text)
-    
-    // Translate text using OpenAI
-    translated_text = CALL translate_text(openai_client, text, 'right')
-    
-    // Format message for posting
-    full_content = COMBINE header with translated content
-    IF original link found:
-        ADD source attribution with link
-    
-    // Send to destination
-    IF image available:
-        SEND image with caption (up to 1024 chars)
-        IF text longer than 1024 chars:
-            SEND remaining text as separate message
-    ELSE:
-        SEND full text message
-    
-    RETURN success status
-```
-
-### Background Tasks
-```
-FUNCTION background_keep_alive(client):
-    WHILE true:
-        UPDATE online status
-        LOG "Connection keep-alive"
-        SLEEP for KEEP_ALIVE_INTERVAL
-```
-
-```
-FUNCTION background_update_checker(client):
-    INITIALIZE last_check_time
-    WHILE true:
-        TRY client.catch_up() to get any missed updates
-        
-        IF time since last check >= CHECK_CHANNEL_INTERVAL:
-            GET recent messages from source channel
-            FOR each message:
-                IF message is new since last check AND not already processed:
-                    PROCESS the message
-            UPDATE last_check_time
-        
-        SLEEP for MANUAL_POLL_INTERVAL
-```
-
-```
-FUNCTION background_channel_poller(client):
-    WHILE true:
-        GET channel entity
-        CREATE input channel
-        TRY to get channel difference:
-            FOR each new message:
-                PROCESS the message if it has text
-        SLEEP for MANUAL_POLL_INTERVAL
-```
-
-### Recent Messages Processing Flow
-```
-FUNCTION process_recent_messages(client, count):
-    GET most recent 'count' messages from source channel
-    FOR each message in reverse order (oldest first):
-        IF message has text:
-            PROCESS the message
-            SLEEP briefly to respect rate limits
-    RETURN success status
-```
-
-## Component Interactions
-
-```
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│                 │     │                 │     │                 │
-│  Source Channel │────▶│ Telegram Client │────▶│ OpenAI Service  │
-│                 │     │                 │     │                 │
-└─────────────────┘     └────────┬────────┘     └────────┬────────┘
-                                 │                       │
-                                 │                       │
-                                 ▼                       ▼
-                        ┌─────────────────┐     ┌─────────────────┐
-                        │                 │     │                 │
-                        │  Message        │────▶│ Image Generation│
-                        │  Translation    │     │  (Optional)     │
-                        │                 │     │                 │
-                        └────────┬────────┘     └────────┬────────┘
-                                 │                       │
-                                 │                       │
-                                 ▼                       ▼
-                        ┌─────────────────────────────────────────┐
-                        │                                         │
-                        │        Destination Channel              │
-                        │                                         │
-                        └─────────────────────────────────────────┘
-```
-
-## Data Flow
-1. Message detected in source channel
-2. Message text extracted and sent to OpenAI for translation
-3. Optionally, message context sent to OpenAI for image generation
-4. Translated text (and optionally image) formatted with source attribution
-5. Formatted content posted to destination channel
-
-## Configuration Parameters
-- API_ID, API_HASH: Telegram API credentials
-- PHONE: Phone number for Telegram authentication
-- SESSION_PATH: Path to store session data
-- SRC_CHANNEL, DST_CHANNEL: Channel identifiers
-- TRANSLATION_STYLE: Style of translation (currently fixed to 'right')
-- GENERATE_IMAGES: Toggle for image generation
-- OPENAI_KEY: OpenAI API key
-- CHECK_CHANNEL_INTERVAL: How often to check for missed messages
-- KEEP_ALIVE_INTERVAL: How often to update online status
-- MANUAL_POLL_INTERVAL: How often to manually poll for updates
-
-## Error Handling
-- Connection issues: Automatic reconnection attempts
-- Authentication failures: Proper logging and exit
-- Message processing errors: Logged but doesn't stop the bot
-- Timeout handling: For message fetching and processing
-
-## Next Steps & Improvements
-- Add support for multiple translation styles
-- Implement more robust error handling and recovery
-- Add telemetry and monitoring
-- Implement rate limiting to prevent API throttling
-- Add support for message editing and deletion 
-
-## Reliability Features
-
-| Feature                 | Purpose                                   | Implementation                                |
-|-------------------------|-------------------------------------------|--------------------------------------------|
-| Session Persistence     | Maintain authentication across restarts    | Store session in environment variables      |
-| Channel Polling         | Backup mechanism if events are missed      | Regularly poll source channel with GetChannelDifferenceRequest |
-| Update Checker          | Periodically check for recent messages     | Compare recent messages to processed ones   |
-| Keep-Alive Mechanism    | Keep connection active and prevent timeouts| Regular status updates to telegram servers |
-| Auto-Reconnection       | Handle temporary connection losses         | Detect and reestablish dropped connections  |
-| Message State Persistence | Track last processed message across restarts | Store message ID and timestamp in environment variables |
-| Recovery Upon Restart   | Process messages missed during downtime    | Check for messages newer than last processed ID at startup |
-
-# Recent Improvements - Reliable Megachannel Polling
-
-## PTS Management System
-The bot now uses a robust Position Token for Sequence (PTS) management system that enables reliable polling for large Telegram channels (megachannels):
-
-- Implemented a dedicated `pts_manager.py` module that manages channel-specific PTS values
-- PTS values are persisted using JSON file storage with environment variable fallback for Heroku
-- Properly handles the "Persistent timestamp empty" error during polling initialization
-
-## Enhanced Polling Mechanism
-The previous implementation used three separate background tasks for different types of polling. These have been consolidated into a single, more reliable approach:
-
-```
-FUNCTION poll_big_channel(client, channel_username):
-    TRACK first poll status
-    TRACK message processing status to prevent DB locks
-    
-    WHILE true:
-        IF currently processing a message:
-            BRIEF sleep to avoid DB locks
-            CONTINUE
-        
-        TRY:
-            GET channel entity
-            CREATE input channel
-            GET stored PTS value
-            
-            IF first poll AND no PTS value:
-                GET latest message directly
-                PROCESS latest message
-                GET PTS from dialog entity
-                SAVE initial PTS value
-                MARK first poll as done
-                CONTINUE
-                
-            POLL for channel differences using PTS
-            SAVE updated PTS value
-            
-            FOR each new message:
-                PROCESS message
-                
-            SLEEP based on recommended timeout or default interval
-            
-        CATCH database locked error:
-            SLEEP longer to allow locks to clear
-        CATCH other errors:
-            LOG error
-            SLEEP before retry
-```
-
-## Heroku Compatibility
-The bot is now fully compatible with Heroku's ephemeral filesystem:
-
-- Added patching mechanism to replace file-based PTS storage with environment variables (`CHANNEL_PTS_DATA` or by setting `USE_ENV_PTS_STORAGE=true`). This is now auto-detected in `app.pts_manager`.
-- Implemented proper serialization/deserialization of PTS data via JSON.
-- Created fallback mechanisms to ensure data persistence across dyno restarts.
-- Updated Procfile with correct worker command
-
-## Error Handling Improvements
-- Added special handling for database lock errors with longer sleep periods
-- Improved detection and recovery from "Persistent timestamp empty" errors
-- Better handling of first-time polling initialization
-- More robust message processing with completion tracking
-
-## Database Lock Prevention
-SQLite session files used by Telethon can encounter "database is locked" errors when accessed by multiple processes or during abnormal termination. Improvements include:
-
-- **Message processing flag**: Added a `processing_message` flag to prevent polling during active message processing
-- **Conditional polling**: Skip polling cycles if a message is currently being processed
-- **Longer recovery sleeps**: Extended sleep times (120s) when database locks are detected to allow locks to clear
-- **Session cleanup tools**: Added `scripts/unlock_sessions.sh` to help diagnose and fix session lock issues
-- **Automatic cleanup**: Enhanced `test_polling_flow.sh` to automatically clean up session journal files
-
-The database lock prevention system significantly improves reliability by:
-1. Isolating database operations to prevent concurrent access
-2. Adding proper detection and recovery for lock errors
-3. Implementing graceful handling rather than crashing the process
-4. Providing tools to diagnose and resolve persistent issues
-
-## Testing Framework
-- Added `test_polling.py` script to send test messages that trigger the polling mechanism
-- Created `test_polling_flow.sh` to automate the testing process
-- Made test mode compatible with the new polling mechanism
-- Added extensive logging to track polling behavior
-
-These improvements make the bot fully compatible with Telegram's April 2024 change that requires proper short-polling for large channels, while maintaining compatibility with Heroku's ephemeral filesystem environment.
-
-### Heroku Deployment & Management
-
--   `Procfile`: Defines the process types for Heroku (e.g., `worker: python -m app.bot`).
--   `runtime.txt`: Specifies the Python runtime version for Heroku.
--   `setup_heroku.sh`: Script to configure Heroku environment variables by exporting local session data (`TG_SESSION_STRING`) and application state (`LAST_PROCESSED_STATE`).
-    -   **Troubleshooting: Heroku Config Var Size Limit**: If `setup_heroku.sh` fails with an error like "Your app config vars combined must be under 64kB", it's likely because the `TG_SESSION_STRING` is too large. This happens when the underlying Telethon session file (e.g., `session/your_session_name.session`) has accumulated a lot of data.
-        -   **Solution**:
-            1.  Create a new, clean Telethon session file specifically for Heroku (e.g., by running a minimal script that connects, authenticates if necessary, and disconnects).
-            2.  Update your local `.env` file's `TG_SESSION` variable to point to this new, clean session name.
-            3.  Re-run `setup_heroku.sh`. This will generate a much smaller `TG_SESSION_STRING`.
--   `heroku_session_setup.py`: (Potentially obsolete or for specific one-off setups, review usage).
--   Environment Variables:

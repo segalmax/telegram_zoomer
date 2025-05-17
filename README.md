@@ -22,26 +22,55 @@ A bot that monitors a Telegram channel (NYT), translates messages to Russian Zoo
 
 ## Configuration
 
-The bot is configured through environment variables set in a `.env` file or via Heroku config variables:
+The bot is configured through environment variables set in `.env` and `app_settings.env` files or via Heroku config variables:
 
-| Variable              | Description                                 | Required | Default Value |
-|-----------------------|---------------------------------------------|----------|---------------|
-| TG_API_ID             | Telegram API ID                             | Yes      | -             |
-| TG_API_HASH           | Telegram API Hash                           | Yes      | -             |
-| TG_PHONE              | Phone number for Telegram authentication    | Yes      | -             |
-| OPENAI_API_KEY        | OpenAI API key                              | Yes      | -             |
-| SRC_CHANNEL           | Source channel to monitor                   | Yes      | -             |
-| DST_CHANNEL           | Destination channel to post translations    | Yes      | -             |
-| TG_SESSION            | Session name for local runs (e.g., `session/my_bot`) | No       | `session/default_persistent_bot_session` |
-| GENERATE_IMAGES       | Whether to generate images for posts        | No       | true          |
-| TRANSLATION_STYLE     | Translation style (only 'right' supported)  | No       | right         |
-| CHECK_CHANNEL_INTERVAL| Interval for periodic GetState checks (sec) | No       | 300           |
-| KEEP_ALIVE_INTERVAL   | Interval for keep-alive signals (sec)       | No       | 60            |
-| MANUAL_POLL_INTERVAL  | Interval for GetChannelDifference polling (sec) | No       | 180           |
-| TG_SESSION_STRING     | Base64 encoded Telethon session (Heroku)    | No*      | -             |
-| LAST_PROCESSED_STATE  | Base64 encoded application state (Heroku)   | No*      | -             |
+| Variable              | Description                                 | Required | Default Value | Location      |
+|-----------------------|---------------------------------------------|----------|---------------|---------------|
+| TG_API_ID             | Telegram API ID                             | Yes      | -             | `.env`        |
+| TG_API_HASH           | Telegram API Hash                           | Yes      | -             | `.env`        |
+| TG_PHONE              | Phone number for Telegram authentication    | Yes      | -             | `.env`        |
+| OPENAI_API_KEY        | OpenAI API key                              | Yes      | -             | `.env`        |
+| STABILITY_AI_API_KEY  | Stability AI API key (if used)              | No       | -             | `.env`        |
+| SRC_CHANNEL           | Source channel to monitor                   | Yes      | -             | `app_settings.env` |
+| DST_CHANNEL           | Destination channel to post translations    | Yes      | -             | `app_settings.env` |
+| TG_SESSION            | Session name for local runs (e.g., `session/my_bot`) | No       | `session/default_persistent_bot_session` | `app_settings.env` |
+| GENERATE_IMAGES       | Whether to generate images for posts        | No       | true          | `app_settings.env` |
+| TRANSLATION_STYLE     | Translation style ('left', 'right', 'both') | No       | both          | `app_settings.env` |
+| HEROKU_APP_NAME       | Name of your Heroku app                     | No*      | -             | `app_settings.env` |
+| TG_COMPRESSED_SESSION_STRING | Compressed Base64 encoded Telethon session (Heroku) | No*      | -             | (set by `setup_heroku.sh`) |
+| LAST_PROCESSED_STATE  | Base64 encoded application state (Heroku)   | No*      | -             | (set by `setup_heroku.sh`) |
 
-*`TG_SESSION_STRING` and `LAST_PROCESSED_STATE` are primarily for Heroku, automatically handled by `setup_heroku.sh` for initial setup. The bot will log updates needed for `LAST_PROCESSED_STATE` during operation on Heroku.
+*`TG_COMPRESSED_SESSION_STRING` and `LAST_PROCESSED_STATE` are primarily for Heroku, automatically handled by `setup_heroku.sh` for initial setup. The bot will log updates needed for `LAST_PROCESSED_STATE` during operation on Heroku.
+
+### Environment Setup
+
+The application uses a dual environment file approach for better security and configuration management:
+
+1. **Create an `.env` file** for sensitive credentials:
+   ```
+   # .env - SENSITIVE CREDENTIALS (gitignored)
+   TG_API_ID=your_telegram_api_id
+   TG_API_HASH=your_telegram_api_hash
+   TG_PHONE=your_phone_number_for_initial_auth
+   OPENAI_API_KEY=your_openai_api_key
+   STABILITY_AI_API_KEY=your_stability_ai_key  # Optional
+   ```
+
+2. **Create an `app_settings.env` file** for non-sensitive application settings:
+   ```
+   # app_settings.env - APPLICATION SETTINGS (accessible to tools)
+   SRC_CHANNEL=source_channel_username_or_id
+   DST_CHANNEL=destination_channel_username_or_id
+   TEST_SRC_CHANNEL=test_source_channel  # For testing
+   TEST_DST_CHANNEL=test_destination_channel  # For testing
+   TG_SESSION=session/my_bot_session
+   TRANSLATION_STYLE=both  # 'left', 'right', or 'both'
+   GENERATE_IMAGES=true  # 'true' or 'false'
+   HEROKU_APP_NAME=your-heroku-app-name  # Used by setup_heroku.sh
+   ```
+
+3. **Ensure proper .gitignore settings**:
+   The repository includes a `.gitignore` that excludes `.env` (to protect secrets) but includes an exception for `app_settings.env` to allow non-sensitive configuration to be shared.
 
 ### Configuration
 
@@ -118,28 +147,56 @@ If you configured `TG_SESSION=session/new_session`, ensure you move your existin
 
 The bot is designed to work seamlessly on Heroku:
 
-1. Clone the repository
-2. Create a new Heroku app
-3. Set up a local session by running the bot on your machine
-4. Export the session and message state using the provided script:
+1. **Set up local environment**:
+   - Create both `.env` and `app_settings.env` as described above
+   - Set `HEROKU_APP_NAME` in `app_settings.env` to your Heroku app name
+
+2. **Create a local session** by running the bot locally first:
    ```
-   python export_session.py session/your_session_name
+   python create_heroku_session.py
    ```
-5. Use the setup script to configure Heroku:
+   This will create and authorize a session file specifically for Heroku use.
+
+3. **Deploy configuration to Heroku** using the enhanced setup script:
    ```
-   ./setup_heroku.sh your-heroku-app-name
+   bash setup_heroku.sh
    ```
-   This script will use `export_session.py` to read your local `TG_SESSION` file (e.g., `session/my_bot_session.session`) and your local application state file (`session/app_state.json`), then set `TG_SESSION_STRING` and `LAST_PROCESSED_STATE` on Heroku, along with other variables from your `.env` file.
-6. Deploy to Heroku using Git:
+   This script:
+   - Reads the app name from `app_settings.env`
+   - Reads and sets all environment variables from both `.env` and `app_settings.env`
+   - Exports and compresses the Telethon session to fit within Heroku's 64KB config var size limit
+   - Sets `TG_COMPRESSED_SESSION_STRING` instead of the older `TG_SESSION_STRING`
+   - Removes obsolete environment variables
+
+4. **Deploy to Heroku** using Git:
    ```
+   heroku git:remote -a your-heroku-app-name
    git push heroku main
    ```
-7. Scale up the worker dyno:
+
+5. **Scale up the worker dyno**:
    ```
-   heroku ps:scale worker=1 --app your-heroku-app-name
+   heroku ps:scale worker=1 -a your-heroku-app-name
    ```
 
-The session and application state persistence is handled automatically. The bot loads state from `TG_SESSION_STRING` and `LAST_PROCESSED_STATE` on Heroku. When running on Heroku, if the bot updates its state (e.g. processes new messages, updates PTS), it will log the new `LAST_PROCESSED_STATE` string, which you should then update in your Heroku app's config vars to ensure persistence across restarts.
+### Session Compression
+
+The bot uses gzip compression to reduce the Telethon session size for Heroku:
+- Original session files (~28KB) are compressed to ~1KB
+- `TG_COMPRESSED_SESSION_STRING` contains the gzip-compressed, Base64-encoded session
+- The `app.session_manager` module automatically handles decompression during startup
+- If `TG_COMPRESSED_SESSION_STRING` is not found, the system falls back to the older `TG_SESSION_STRING` format
+
+### Heroku Configuration Updates
+
+If you need to update the Heroku environment variables manually:
+
+1. **Session data**: Run `python export_session.py` to get the latest compressed session string
+2. **Application settings**: Any changes to `app_settings.env` should be re-deployed using `bash setup_heroku.sh`
+3. **State persistence**: When the bot logs a new `LAST_PROCESSED_STATE` value, update it in Heroku:
+   ```
+   heroku config:set LAST_PROCESSED_STATE="new_value" -a your-heroku-app-name
+   ```
 
 ## Polling Mechanism
 
@@ -201,6 +258,29 @@ To resolve database lock issues:
    ```
 
 4. Ensure all bot processes are fully terminated before starting new ones.
+
+### Session Authentication Errors
+
+If you encounter errors like "The authorization key (session file) was used under two different IP addresses simultaneously", it means you're trying to use the same Telegram session from multiple locations (e.g., your local machine and Heroku):
+
+1. The bot now handles this automatically by using different session paths for local vs. Heroku environments
+2. When running locally, it uses `session/local_bot_session`
+3. When running on Heroku, it uses `session/heroku_bot_session`
+4. This separation prevents the conflicts between environments
+
+If you still encounter this error:
+```bash
+# Delete the corrupted session file
+rm session/local_bot_session.session
+
+# Run the bot to create a new session
+python -m app.bot
+
+# Update Heroku with the setup script after authentication
+./setup_heroku.sh
+```
+
+This ensures both environments have separate, valid sessions.
 
 ### Monitoring and Maintenance
 
