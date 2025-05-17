@@ -466,6 +466,7 @@ async def main():
     parser.add_argument('--stability', action='store_true', help='Test with Stability AI image generation')
     parser.add_argument('--no-images', action='store_true', help='Disable image generation for testing')
     parser.add_argument('--new-session', action='store_true', help='Force creation of a new session (requires re-authentication)')
+    parser.add_argument('--process-recent', type=int, help='Process N recent messages from the source channel')
     
     args = parser.parse_args()
     
@@ -473,15 +474,54 @@ async def main():
     if hasattr(args, 'bot_mode') and args.bot_mode:
         logger.info("=== Running in REAL BOT MODE with test channels ===")
         
-        # Patch the environment to use test channels
+        # Validate test channels are set
+        if not TEST_SRC_CHANNEL or not TEST_DST_CHANNEL:
+            logger.error("TEST_SRC_CHANNEL and TEST_DST_CHANNEL must be set in .env for bot mode")
+            return False
+            
+        # Patch the environment to use test channels - make sure we're using the same format
+        logger.info(f"Using test source channel: {TEST_SRC_CHANNEL}")
+        logger.info(f"Using test destination channel: {TEST_DST_CHANNEL}")
+        
+        # Save the original values to restore later
+        original_src = os.environ.get('SRC_CHANNEL')
+        original_dst = os.environ.get('DST_CHANNEL')
+        
+        # Set the environment variables for the test
         os.environ['SRC_CHANNEL'] = TEST_SRC_CHANNEL
         os.environ['DST_CHANNEL'] = TEST_DST_CHANNEL
         
         # Patch PTS storage for Heroku compatibility
         patch_pts_functions_for_heroku()
         
+        # Create empty sys.argv to avoid parsing errors in bot.py's argparse
+        # We'll pass only the arguments that main() in bot.py can handle
+        import sys
+        original_argv = sys.argv.copy()
+        sys.argv = [sys.argv[0]]  # Keep only the script name
+
+        # Add --no-images if specified
+        if args.no_images:
+            os.environ['GENERATE_IMAGES'] = 'false'
+            logger.info("Image generation disabled for bot mode")
+        
+        # Add --process-recent if specified
+        if hasattr(args, 'process_recent') and args.process_recent:
+            sys.argv.append('--process-recent')
+            sys.argv.append(str(args.process_recent))
+
         # Run the actual bot's main function
-        return await bot_main()
+        try:
+            return await bot_main()
+        finally:
+            # Restore original argv
+            sys.argv = original_argv
+            
+            # Restore original environment variables if they existed
+            if original_src:
+                os.environ['SRC_CHANNEL'] = original_src
+            if original_dst:
+                os.environ['DST_CHANNEL'] = original_dst
     
     success = True
     

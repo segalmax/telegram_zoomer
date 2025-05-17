@@ -493,13 +493,48 @@ async def poll_big_channel(client, channel_username):
                         break
                     
                 except Exception as e:
-                    logger.error(f"Error in poll_big_channel inner loop: {e}")
-                    break
+                    err_str = str(e)
+                    if "Persistent timestamp empty" in err_str:
+                        # This is normal for first call or after a long time
+                        logger.info("Channel needs initialization. Getting fresh pts value.")
+                        
+                        # Get channel state to get a fresh pts value
+                        try:
+                            # Get a latest message to establish a baseline timestamp
+                            messages = await client.get_messages(channel_username, limit=1)
+                            if messages and len(messages) > 0:
+                                # Process the message directly
+                                latest_msg = messages[0]
+                                if hasattr(latest_msg, 'message') and latest_msg.message:
+                                    logger.info(f"Processing latest message directly: {latest_msg.id}")
+                                    await translate_and_post(client, latest_msg.message, latest_msg.id)
+                                
+                                # Try to get the pts value from the dialog
+                                dialog = await client.get_entity(channel_username)
+                                if hasattr(dialog, 'pts'):
+                                    pts = dialog.pts
+                                    logger.info(f"Using pts={pts} from dialog entity")
+                                    save_pts(channel_username, pts)
+                        except Exception as get_pts_err:
+                            logger.error(f"Error getting fresh pts: {get_pts_err}")
+                            
+                        # Sleep longer before next attempt to avoid spamming
+                        await asyncio.sleep(60)
+                        break
+                    else:
+                        # This is an actual error
+                        logger.error(f"Error in poll_big_channel inner loop: {e}")
+                        break
             
             # Get the timeout value or default to 30 seconds
-            sleep_seconds = getattr(diff, 'timeout', 30)
-            logger.debug(f"Sleeping for {sleep_seconds} seconds before next poll")
-            await asyncio.sleep(sleep_seconds)
+            try:
+                # Use diff.timeout if available, otherwise default to 30 seconds
+                sleep_seconds = getattr(diff, 'timeout', 30) if 'diff' in locals() else 30
+                logger.debug(f"Sleeping for {sleep_seconds} seconds before next poll")
+                await asyncio.sleep(sleep_seconds)
+            except Exception as e:
+                logger.error(f"Error calculating sleep time: {e}")
+                await asyncio.sleep(30)  # Default fallback
             
         except Exception as e:
             logger.error(f"Error in poll_big_channel: {e}")
