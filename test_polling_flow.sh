@@ -71,7 +71,7 @@ echo "🚀 Starting Telegram Bot in test mode (background)..."
 export GENERATE_IMAGES=false
 export TEST_MODE=true
 export TEST_RUN_MESSAGE_PREFIX="$MESSAGE_PREFIX"
-python test.py --bot-mode > "$BOT_LOG_FILE" 2>&1 &
+python -m pytest tests/test_e2e_unified.py::test_run_bot_mode --bot-mode -s --log-cli-level=INFO > "$BOT_LOG_FILE" 2>&1 &
 BOT_PID=$!
 
 echo "⏳ Bot starting with PID $BOT_PID. Waiting for it to initialize and process the message (max ${TEST_TIMEOUT_SECONDS}s)..."
