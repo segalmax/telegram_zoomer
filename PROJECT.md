@@ -1,4 +1,4 @@
-# Telegram NYT-to-Zoomer Bot - Project Tasks
+# Telegram News-to-Zoomer Bot - Project Tasks
 
 ## MVP Core Functionality
 - [x] Basic bot script (`bot.py`)

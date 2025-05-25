@@ -1,11 +1,11 @@
-# Telegram NYT-to-Zoomer Translator
+# Telegram News-to-Zoomer Translator
 
-A bot that monitors a Telegram channel (NYT), translates messages to Russian Zoomer slang using OpenAI, and posts them to another channel.
+A bot that monitors news Telegram channels, translates messages to Russian Zoomer slang using OpenAI, and posts them to another channel. Currently configured for ynet.co.il content.
 
 ## Features
 
 - Automatic message monitoring from source channel
-- OpenAI GPT-4o mini translation to Russian Zoomer slang
+- OpenAI GPT-4o mini translation to Russian Zoomer slang (website-agnostic)
 - Robust error handling with retries
 - Persistent session storage
 - Comprehensive logging
@@ -215,19 +215,39 @@ The bot uses a sophisticated polling mechanism to reliably receive updates from 
 3. **GetChannelDifferenceRequest**: The bot uses Telegram's API to request all updates since the last known PTS from the application state.
 4. **State Updates**: After fetching and processing messages, or after getting a new PTS from Telegram, the bot updates its application state and saves it (locally to file, and logs the string for Heroku).
 
-### Testing Polling
+### Testing
 
-To test the polling mechanism:
+The project includes comprehensive tests in the `tests/` directory:
+
+```bash
+# Run all tests
+python -m pytest tests/ -v
+
+# Run specific test categories
+python -m pytest tests/test_article_extractor.py -v  # Article extraction tests
+python -m pytest tests/test_integration.py -v       # Integration tests
+python -m pytest tests/test_e2e_unified.py -v       # End-to-end tests
+
+# Run individual test files directly
+python tests/test_article_extractor.py
+python tests/test_integration.py
+```
+
+#### Testing Polling
+
+To test the polling mechanism specifically:
 
 ```bash
 # Start the bot in test mode (background)
 ./test_polling_flow.sh
 
 # In another terminal, send a test message
-python test_polling.py
+python tests/test_polling.py
 ```
 
 The bot should detect the message via polling rather than event handlers.
+
+See `tests/README.md` for detailed testing documentation.
 
 ## Troubleshooting
 
