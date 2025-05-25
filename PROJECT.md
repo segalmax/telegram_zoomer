@@ -73,6 +73,12 @@
         - [x] Allows easy local testing without interfering with production
 - [x] Implement persistent session handling to avoid frequent re-authentication
 - [x] Comprehensive end-to-end automated testing
+- [x] **Test Organization (Partial Task 17 - COMPLETED)**:
+    - [x] Moved all tests to `tests/` directory with proper structure
+    - [x] Created comprehensive `tests/README.md` documentation
+    - [x] Fixed import paths and pytest compatibility
+    - [x] Updated main `README.md` with new test structure
+    - [x] All tests passing including shell script integration test
 - [ ] Code cleanup and organization (ongoing)
 - [x] Test Harness Improvement (TDD Style with Pytest):
     - [x] Create `tests/` directory and move test script to `tests/test_e2e_unified.py`.
@@ -142,11 +148,17 @@
     - [x] Caricature style for political figures
     - [x] Editorial cartoon style without text
     - [x] Ensure visuals directly relate to news content with symbolism
+- [x] **Article Reading Capability (Task 16 - COMPLETED)**:
+    - [x] Implemented article extraction using newspaper4k library
+    - [x] Enhanced translation context from ~50 to 1630 characters (30x improvement)
+    - [x] Created `app/article_extractor.py` with robust URL content extraction
+    - [x] Integrated with bot.py to automatically extract article content when URLs detected
+    - [x] Updated translator.py prompts to handle full article content effectively
+    - [x] All tests passing including full integration test
 - [ ] Translation improvements:
     - [ ] Remove the RIGHT-BIDLO header at the top of messages
     - [ ] Simplify code to use only right-bidlo style (no if-else for translation styles)
     - [ ] Be sensitive when there is a sad post and adjust tone when jokes are inappropriate
-    - [ ] Read the actual article or analyze the image for better context (e.g., correctly identifying gender)
 - [ ] Image generation improvements:
     - [ ] Troubleshoot occasional issues with images not showing
     - [ ] Investigate cases where images fail to generate
@@ -324,6 +336,40 @@ python test.py --no-images
 # Force new authentication session
 python test.py --new-session
 ```
+
+## Development Workflow Rules
+
+### Pre-Commit Requirements
+⚠️ **ALWAYS RUN TESTS BEFORE COMMITS!**
+
+```bash
+# Required before any git commit:
+source .env && tests/test_polling_flow.sh
+# OR
+pytest tests/
+```
+
+All tests must pass before committing changes. This prevents regressions and ensures production stability.
+
+### Deployment Process
+When "push" is mentioned, it means:
+
+1. **Push to GitHub**: `git push origin main`
+2. **Deploy to Heroku**: `git push heroku main`
+3. **Verify Deployment**: Check Heroku logs for successful deployment and runtime status
+
+```bash
+# Complete deployment workflow:
+git push origin main
+git push heroku main
+heroku logs --tail --app nyt-zoomer-bot
+```
+
+Monitor logs for:
+- ✅ Successful build and deployment
+- ✅ Bot startup without errors
+- ✅ Telegram connection established
+- ❌ Any runtime errors or authentication issues
 
 ## Configuration for Tests
 

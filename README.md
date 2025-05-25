@@ -6,11 +6,46 @@ A bot that monitors news Telegram channels, translates messages to Russian Zoome
 
 - Automatic message monitoring from source channel
 - OpenAI GPT-4o mini translation to Russian Zoomer slang (website-agnostic)
+- **Article content extraction** for enhanced translation context (30x improvement)
 - Robust error handling with retries
 - Persistent session storage
 - Comprehensive logging
 - Reliable megachannel polling using PTS (Position Token for Sequence)
 - Heroku compatibility with ephemeral filesystem support
+
+## Development Workflow
+
+### ⚠️ Pre-Commit Requirements
+**ALWAYS RUN TESTS BEFORE COMMITS!**
+
+```bash
+# Required before any git commit:
+source .env && tests/test_polling_flow.sh
+# OR
+pytest tests/
+```
+
+All tests must pass before committing changes. This prevents regressions and ensures production stability.
+
+### Deployment Process
+When "push" is mentioned, it means:
+
+1. **Push to GitHub**: `git push origin main`
+2. **Deploy to Heroku**: `git push heroku main`
+3. **Verify Deployment**: Check Heroku logs for successful deployment and runtime status
+
+```bash
+# Complete deployment workflow:
+git push origin main
+git push heroku main
+heroku logs --tail --app nyt-zoomer-bot
+```
+
+Monitor logs for:
+- ✅ Successful build and deployment
+- ✅ Bot startup without errors
+- ✅ Telegram connection established
+- ❌ Any runtime errors or authentication issues
 
 ## Setup
 

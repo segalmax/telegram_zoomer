@@ -28,6 +28,40 @@ Task Master offers two primary ways to interact:
 
 ## Standard Development Workflow Process
 
+### Pre-Commit Requirements
+⚠️ **ALWAYS RUN TESTS BEFORE COMMITS!**
+
+```bash
+# Required before any git commit:
+source .env && tests/test_polling_flow.sh
+# OR
+pytest tests/
+```
+
+All tests must pass before committing changes. This prevents regressions and ensures production stability.
+
+### Deployment Process
+When "push" is mentioned, it means:
+
+1. **Push to GitHub**: `git push origin main`
+2. **Deploy to Heroku**: `git push heroku main`
+3. **Verify Deployment**: Check Heroku logs for successful deployment and runtime status
+
+```bash
+# Complete deployment workflow:
+git push origin main
+git push heroku main
+heroku logs --tail --app nyt-zoomer-bot
+```
+
+Monitor logs for:
+- ✅ Successful build and deployment
+- ✅ Bot startup without errors
+- ✅ Telegram connection established
+- ❌ Any runtime errors or authentication issues
+
+### Task Management Process
+
 -   Start new projects by running `initialize_project` tool / `task-master init` or `parse_prd` / `task-master parse-prd --input='<prd-file.txt>'` (see [`taskmaster.md`](mdc:.roo/rules/taskmaster.md)) to generate initial tasks.json
 -   Begin coding sessions with `get_tasks` / `task-master list` (see [`taskmaster.md`](mdc:.roo/rules/taskmaster.md)) to see current tasks, status, and IDs
 -   Determine the next task to work on using `next_task` / `task-master next` (see [`taskmaster.md`](mdc:.roo/rules/taskmaster.md)).
