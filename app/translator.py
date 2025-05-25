@@ -27,8 +27,10 @@ def get_prompt(style):
             "with relevant emojis that enhance the humor. "
             "Keep the content informative first, with a progressive angle, but make it entertaining and shareable. "
             "The tone should be like a funny friend explaining news over drinks - factual but with personality!\n\n"
-            "IMPORTANT: If there's a link to nytimes.com or nyti.ms in the original text, you MUST end your translation with '🔗 Оригинал: [URL]', "
-            "where [URL] is the full NYTimes URL found in the original."
+            "If the message includes article content, use it to provide better context and more accurate translation. "
+            "Focus on the main facts from the article content rather than just the brief message text.\n\n"
+            "IMPORTANT: If there's a link to news websites in the original text, you MUST end your translation with '🔗 Оригинал: [URL]', "
+            "where [URL] is the news URL found in the original."
         )
         logger.info("Using LEFT style prompt")
         return prompt
@@ -39,16 +41,20 @@ def get_prompt(style):
             "Include 1-2 biting observations or funny takes that highlight absurdities from a traditional perspective. "
             "Your tone is intelligent but irreverent, like Lebedev's blog - mix cultural references, caustic humor, and occasіonally crude expressions. "
             "Keep the post primarily informative but make it entertaining and quotable with your signature sarcasm!\n\n"
-            "IMPORTANT: If there's a link to nytimes.com or nyti.ms in the original text, you MUST end your translation with '🔗 Оригинал: [URL]', "
-            "where [URL] is the full NYTimes URL found in the original."
+            "If the message includes article content, use it to provide better context and more accurate translation. "
+            "Focus on the main facts from the article content rather than just the brief message text.\n\n"
+            "IMPORTANT: If there's a link to news websites in the original text, you MUST end your translation with '🔗 Оригинал: [URL]', "
+            "where [URL] is the news URL found in the original."
         )
         logger.info("Using RIGHT style prompt")
         return prompt
     else:
         prompt = (
             "You are a witty Russian news blogger with modern sensibilities. Translate the following text into clear, informative Russian but add your own humorous observations and commentary to make it entertaining.\n\n"
-            "IMPORTANT: If there's a link to nytimes.com or nyti.ms in the original text, you MUST end your translation with '🔗 Оригинал: [URL]', "
-            "where [URL] is the full NYTimes URL found in the original."
+            "If the message includes article content, use it to provide better context and more accurate translation. "
+            "Focus on the main facts from the article content rather than just the brief message text.\n\n"
+            "IMPORTANT: If there's a link to news websites in the original text, you MUST end your translation with '🔗 Оригинал: [URL]', "
+            "where [URL] is the news URL found in the original."
         )
         logger.info("Using DEFAULT style prompt")
         return prompt

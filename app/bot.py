@@ -189,10 +189,21 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
             logger.error("Cannot translate without OpenAI client.")
             return False
         
-        # Append links information to the original text for context
+        # Append links information and article content to the original text for context
         translation_context = txt
         if message_entity_urls and len(message_entity_urls) > 0:
-            translation_context += f"\n\nNote: This message contains a link: {message_entity_urls[0]}"
+            # Try to extract article content from the first URL
+            from .article_extractor import extract_article
+            article_text = extract_article(message_entity_urls[0])
+            
+            if article_text:
+                # Include article content for better translation context
+                translation_context += f"\n\nArticle content from {message_entity_urls[0]}:\n{article_text}"
+                logger.info(f"Added article content ({len(article_text)} chars) to translation context")
+            else:
+                # Fallback to just mentioning the link
+                translation_context += f"\n\nNote: This message contains a link: {message_entity_urls[0]}"
+                logger.info("Article extraction failed, using fallback link mention")
         
         if translation_style == 'right' or translation_style == 'both':
             logger.info("Translating in RIGHT-BIDLO style...")
