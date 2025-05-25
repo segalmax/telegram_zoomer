@@ -1,0 +1,88 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Run All E2E Tests",
+            "type": "shell",
+            "command": "python",
+            "args": [
+                "-m",
+                "pytest",
+                "tests/test_e2e_unified.py",
+                "-s",
+                "--log-cli-level=INFO",
+                "-v"
+            ],
+            "group": {
+                "kind": "test",
+                "isDefault": true
+            },
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "new",
+                "showReuseMessage": true,
+                "clear": false
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Run API Tests Only",
+            "type": "shell",
+            "command": "python",
+            "args": [
+                "-m",
+                "pytest",
+                "tests/test_e2e_unified.py::test_api_translations",
+                "tests/test_e2e_unified.py::test_api_image_generation_dalle",
+                "-s",
+                "--log-cli-level=INFO",
+                "-v"
+            ],
+            "group": "test",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "new"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Run Telegram Pipeline Test",
+            "type": "shell",
+            "command": "python",
+            "args": [
+                "-m",
+                "pytest",
+                "tests/test_e2e_unified.py::test_telegram_pipeline",
+                "-s",
+                "--log-cli-level=INFO",
+                "-v"
+            ],
+            "group": "test",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "new"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Run Original test.py",
+            "type": "shell",
+            "command": "python",
+            "args": ["test.py"],
+            "group": "test",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "new"
+            },
+            "problemMatcher": []
+        }
+    ]
+} 

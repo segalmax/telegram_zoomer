@@ -73,7 +73,20 @@
         - [x] Allows easy local testing without interfering with production
 - [x] Implement persistent session handling to avoid frequent re-authentication
 - [x] Comprehensive end-to-end automated testing
-- [x] Code cleanup and organization (ongoing)
+- [ ] Code cleanup and organization (ongoing)
+- [x] Test Harness Improvement (TDD Style with Pytest):
+    - [x] Create `tests/` directory and move test script to `tests/test_e2e_unified.py`.
+    - [x] Implement `tests/conftest.py` for command-line options and shared fixtures (e.g., `test_args`, error handler).
+    - [x] Refactor `tests/test_e2e_unified.py` to use `pytest` test functions and fixtures.
+        - [x] Separate test scenarios (API, Telegram pipeline, Bot mode) into distinct `pytest` test functions.
+        - [x] Adapt argument parsing to use `pytest` options.
+        - [x] Integrate `ErrorCounterHandler` to fail tests if errors are logged globally.
+        - [x] **Successfully converted to pytest-based TDD harness** - tests run green with same functionality as original `test.py`
+        - [x] **Fixed f-string syntax error** in message verification logging
+        - [x] **Maintained all original test capabilities** including bot mode, stability AI, and session management
+        - [x] **Created VS Code/Cursor test configuration** - one-click test execution with detailed logging via `.vscode/launch.json`, `tasks.json`, and `settings.json`
+    - [ ] Further refactor tests for granularity (e.g., separate API tests, Telegram client interaction tests).
+    - [ ] Introduce unit tests with mocking for core components (e.g., `translator.py`, `image_generator.py`).
 
 ## Configuration
 - [x] Use `.env` file for all configurations
@@ -129,6 +142,17 @@
     - [x] Caricature style for political figures
     - [x] Editorial cartoon style without text
     - [x] Ensure visuals directly relate to news content with symbolism
+- [ ] Translation improvements:
+    - [ ] Remove the RIGHT-BIDLO header at the top of messages
+    - [ ] Simplify code to use only right-bidlo style (no if-else for translation styles)
+    - [ ] Be sensitive when there is a sad post and adjust tone when jokes are inappropriate
+    - [ ] Read the actual article or analyze the image for better context (e.g., correctly identifying gender)
+- [ ] Image generation improvements:
+    - [ ] Troubleshoot occasional issues with images not showing
+    - [ ] Investigate cases where images fail to generate
+- [ ] Link handling enhancements:
+    - [ ] Fix duplicate links issue (Ссылка из статьи and Оригинал are currently the same link)
+    - [ ] Format links as proper hyperlinks without showing the full URL
 - [ ] User command to trigger translation of a specific URL
 - [ ] Interactive setup/auth script (was `scripts/complete_auth.py`)
 - [ ] More advanced error recovery (e.g., retry mechanisms with backoff for API calls)
@@ -138,6 +162,7 @@
 - [ ] Improve logging structure (e.g., JSON logs, more context)
 - [ ] CI/CD pipeline for automated testing and deployment
 - [ ] Add more unit and integration tests 
+- [ ] Review and document the safety of APP_STATE_FILE in ephemeral container environments
 
 # Testing Documentation
 

@@ -1,0 +1,122 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Run All E2E Tests (with logs)",
+            "type": "python",
+            "request": "launch",
+            "module": "pytest",
+            "args": [
+                "tests/test_e2e_unified.py",
+                "-s",
+                "--log-cli-level=INFO",
+                "-v"
+            ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            }
+        },
+        {
+            "name": "Run API Tests Only",
+            "type": "python",
+            "request": "launch",
+            "module": "pytest",
+            "args": [
+                "tests/test_e2e_unified.py::test_api_translations",
+                "tests/test_e2e_unified.py::test_api_image_generation_dalle",
+                "-s",
+                "--log-cli-level=INFO",
+                "-v"
+            ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            }
+        },
+        {
+            "name": "Run Telegram Pipeline Test",
+            "type": "python",
+            "request": "launch",
+            "module": "pytest",
+            "args": [
+                "tests/test_e2e_unified.py::test_telegram_pipeline",
+                "-s",
+                "--log-cli-level=INFO",
+                "-v"
+            ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            }
+        },
+        {
+            "name": "Run Tests with Stability AI",
+            "type": "python",
+            "request": "launch",
+            "module": "pytest",
+            "args": [
+                "tests/test_e2e_unified.py",
+                "--stability",
+                "-s",
+                "--log-cli-level=INFO",
+                "-v"
+            ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            }
+        },
+        {
+            "name": "Run Tests without Images",
+            "type": "python",
+            "request": "launch",
+            "module": "pytest",
+            "args": [
+                "tests/test_e2e_unified.py",
+                "--no-images",
+                "-s",
+                "--log-cli-level=INFO",
+                "-v"
+            ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            }
+        },
+        {
+            "name": "Run Bot Mode Test",
+            "type": "python",
+            "request": "launch",
+            "module": "pytest",
+            "args": [
+                "tests/test_e2e_unified.py::test_run_bot_mode",
+                "--bot-mode",
+                "-s",
+                "--log-cli-level=INFO",
+                "-v"
+            ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            }
+        },
+        {
+            "name": "Run Original test.py (for comparison)",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/test.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            }
+        }
+    ]
+} 
