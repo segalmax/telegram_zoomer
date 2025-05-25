@@ -51,7 +51,7 @@ cleanup
 
 # Run test_polling.py to get the unique message prefix AND SEND THE MESSAGE
 echo "📬 Obtaining unique message prefix from test_polling.py (this also sends the message)..."
-polling_output=$(python test_polling.py)
+polling_output=$(python tests/test_polling.py)
 MESSAGE_PREFIX=$(echo "$polling_output" | grep "MESSAGE_PREFIX_SENT:" | cut -d ':' -f2)
 
 if [ -z "$MESSAGE_PREFIX" ]; then

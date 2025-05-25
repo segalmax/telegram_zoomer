@@ -60,3 +60,5 @@ node_modules/
 # Task files
 tasks.json
 tasks/ 
+# MCP configuration with API keys (use mcp.json.example as template)
+.cursor/mcp.json
