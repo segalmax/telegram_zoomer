@@ -457,3 +457,93 @@ python -m pytest tests/ -v
 5. Cleans up processes and sessions
 
 **Note**: The bot is optimized for test mode - when `TEST_RUN_MESSAGE_PREFIX` is set, it only processes messages containing that prefix, making tests fast and reliable.
+
+## Development Rules & Learnings
+
+### Testing Protocol
+1. **Always run ALL tests before commits**:
+   ```bash
+   # Standard pytest tests
+   python -m pytest tests/ -v
+   
+   # Polling mechanism test (shell script, not pytest)
+   ./tests/test_polling_flow.sh
+   ```
+
+2. **Test Types Understanding**:
+   - **pytest tests**: Unit/integration tests in `tests/` directory
+   - **Polling test**: Shell script that runs bot in background + sends test message
+   - **NOT related**: Polling test is NOT a pytest test, it's a separate shell script
+
+3. **Test Optimization Approach**:
+   - When tests timeout, check if they're processing too many messages
+   - Use test mode filtering (e.g., `TEST_RUN_MESSAGE_PREFIX`) to process only relevant messages
+   - Optimize for speed by skipping unrelated processing during tests
+
+### Link Formatting Implementation
+1. **Hyperlink format**: Use `[text](url)` markdown format with `parse_mode='md'`
+2. **Testing hyperlinks**: Don't check for "hidden URLs" - markdown still contains URLs in `[text](url)` format
+3. **Correct test logic**: Check for absence of bare URLs, not absence of URLs entirely
+
+### Task Management Workflow
+1. **Update subtasks as you complete them**: Mark subtasks as "done" immediately after completion
+2. **Document progress**: Update PROJECT.md when significant changes are made
+3. **MVP focus**: Remove non-essential features (like "monitoring" headers) to focus on core functionality
+
+### Code Quality Practices
+1. **Remove redundant headers**: Clean up output by removing unnecessary prefixes like "RIGHT-BIDLO VERSION:"
+2. **Simplify configuration**: Use single translation style instead of complex if/else logic
+3. **Fix duplicate issues**: Identify root cause (e.g., LLM prompts adding links + bot adding links)
+4. **Consistent formatting**: Use markdown hyperlinks throughout for better UX
+
+### Debugging Approach
+1. **Check logs carefully**: Look for actual errors vs expected behavior
+2. **Test incrementally**: Fix one issue at a time and verify
+3. **Use mock clients**: Create simple test clients to verify functionality without full integration
+4. **Understand the flow**: Trace through the entire message processing pipeline
+
+### Environment & Session Management
+1. **Test vs Production**: Use different channels and sessions for testing
+2. **Session persistence**: Understand how Telegram sessions work and persist across restarts
+3. **Environment variables**: Use test-specific env vars to control behavior during testing
+
+### Performance Optimization
+1. **Identify bottlenecks**: Long-running operations (OpenAI calls, image generation) can cause timeouts
+2. **Filter early**: Skip processing irrelevant messages as early as possible
+3. **Use timeouts appropriately**: Set reasonable timeouts based on actual operation duration
+
+### Key Technical Insights from Task 12 Implementation
+
+#### Hyperlink Formatting (Subtask 12.17)
+- **Problem**: Links showed full URLs instead of clean hyperlinks
+- **Solution**: Use `[text](url)` markdown format with `parse_mode='md'` in all `send_message` calls
+- **Implementation**: 
+  ```python
+  source_footer = f"\n\n🔗 [Оригинал]({message_link})"
+  if message_entity_urls:
+      source_footer += f"\n🔗 [Ссылка из статьи]({message_entity_urls[0]})"
+  await client.send_message(channel, text_content, parse_mode='md')
+  ```
+- **Testing gotcha**: Markdown hyperlinks still contain URLs in text - test for absence of bare URLs, not absence of URLs
+
+#### Duplicate Links Fix (Subtask 12.16)
+- **Problem**: Three links appeared instead of two (duplicate "Оригинал" links)
+- **Root cause**: LLM translation prompts instructed to add "🔗 Оригинал: [URL]" while bot.py also added its own links
+- **Solution**: Remove link instructions from ALL translation prompts (LEFT, RIGHT, DEFAULT styles) in translator.py
+- **Result**: Clean two-link structure: Original message + Article link
+
+#### Translation Style Simplification (Subtask 12.14)
+- **Change**: Simplified from supporting both LEFT/RIGHT styles to only RIGHT style
+- **Configuration**: Set `TRANSLATION_STYLE=right` in app_settings.env as default
+- **Code cleanup**: Removed complex if/else logic for translation styles in bot.py
+
+#### Header Removal (Subtask 12.13)
+- **Removed**: "🔴 RIGHT-BIDLO VERSION:" header from posts
+- **Reason**: MVP focus - cleaner, more professional appearance
+- **Implementation**: Simply removed header concatenation in bot.py
+
+#### Test Optimization Discovery
+- **Problem**: Polling test processed ALL pending messages, causing timeouts
+- **Solution**: Add test mode filtering using `TEST_RUN_MESSAGE_PREFIX` environment variable
+- **Key insight**: Tests should be isolated and only process relevant test data
+- **Performance**: Reduced test time from 75s timeout to ~17s completion
