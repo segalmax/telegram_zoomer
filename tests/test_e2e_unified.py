@@ -287,9 +287,10 @@ async def test_telegram_pipeline(test_args):
         assert success, "app.bot.translate_and_post returned False indicating failure"
         logger.info("✅ app.bot.translate_and_post completed successfully")
 
-        logger.info(f"Verifying RIGHT style message in {TEST_DST_CHANNEL}...")
-        right_verified = await verify_message_in_channel(client, TEST_DST_CHANNEL, "RIGHT-BIDLO VERSION", timeout=90) # Increased timeout
-        assert right_verified, "Failed to verify RIGHT-BIDLO translation in destination channel"
+        logger.info(f"Verifying translated message in {TEST_DST_CHANNEL}...")
+        # Look for Russian text indicating successful translation (common Russian words)
+        right_verified = await verify_message_in_channel(client, TEST_DST_CHANNEL, "Оригинал", timeout=90) # Look for source attribution
+        assert right_verified, "Failed to verify translated message in destination channel"
 
         logger.info("Verifying source attribution appears in posted message...")
         source_verified = await verify_message_in_channel(client, TEST_DST_CHANNEL, "Оригинал:", timeout=60, limit=15)

@@ -29,8 +29,7 @@ def get_prompt(style):
             "The tone should be like a funny friend explaining news over drinks - factual but with personality!\n\n"
             "If the message includes article content, use it to provide better context and more accurate translation. "
             "Focus on the main facts from the article content rather than just the brief message text.\n\n"
-            "IMPORTANT: If there's a link to news websites in the original text, you MUST end your translation with '🔗 Оригинал: [URL]', "
-            "where [URL] is the news URL found in the original."
+            "Do not include any links or source attribution in your translation - these will be added separately."
         )
         logger.info("Using LEFT style prompt")
         return prompt
@@ -43,8 +42,7 @@ def get_prompt(style):
             "Keep the post primarily informative but make it entertaining and quotable with your signature sarcasm!\n\n"
             "If the message includes article content, use it to provide better context and more accurate translation. "
             "Focus on the main facts from the article content rather than just the brief message text.\n\n"
-            "IMPORTANT: If there's a link to news websites in the original text, you MUST end your translation with '🔗 Оригинал: [URL]', "
-            "where [URL] is the news URL found in the original."
+            "Do not include any links or source attribution in your translation - these will be added separately."
         )
         logger.info("Using RIGHT style prompt")
         return prompt
@@ -53,8 +51,7 @@ def get_prompt(style):
             "You are a witty Russian news blogger with modern sensibilities. Translate the following text into clear, informative Russian but add your own humorous observations and commentary to make it entertaining.\n\n"
             "If the message includes article content, use it to provide better context and more accurate translation. "
             "Focus on the main facts from the article content rather than just the brief message text.\n\n"
-            "IMPORTANT: If there's a link to news websites in the original text, you MUST end your translation with '🔗 Оригинал: [URL]', "
-            "where [URL] is the news URL found in the original."
+            "Do not include any links or source attribution in your translation - these will be added separately."
         )
         logger.info("Using DEFAULT style prompt")
         return prompt

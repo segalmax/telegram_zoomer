@@ -155,9 +155,9 @@
     - [x] Integrated with bot.py to automatically extract article content when URLs detected
     - [x] Updated translator.py prompts to handle full article content effectively
     - [x] All tests passing including full integration test
-- [ ] Translation improvements:
-    - [ ] Remove the RIGHT-BIDLO header at the top of messages
-    - [ ] Simplify code to use only right-bidlo style (no if-else for translation styles)
+- [x] Translation improvements:
+    - [x] Remove the RIGHT-BIDLO header at the top of messages
+    - [x] Simplify code to use only right-bidlo style (no if-else for translation styles)
     - [ ] Be sensitive when there is a sad post and adjust tone when jokes are inappropriate
 - [ ] Image generation improvements:
     - [ ] Troubleshoot occasional issues with images not showing

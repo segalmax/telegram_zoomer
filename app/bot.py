@@ -182,7 +182,7 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
                 await client_instance.send_message(channel, text_content)
 
         # Get translation style from environment (default to 'both')
-        translation_style = os.getenv("TRANSLATION_STYLE", "both").lower()
+        translation_style = os.getenv("TRANSLATION_STYLE", "right").lower()
 
         # Check for OpenAI client *before* attempting to translate
         if not openai_client:
@@ -209,8 +209,8 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
             logger.info("Translating in RIGHT-BIDLO style...")
             translated_text = await translate_text(openai_client, translation_context, 'right')
             
-            # Combine header with translated content instead of sending separately
-            right_content = f"🔴 RIGHT-BIDLO VERSION:\n\n{translated_text}{source_footer}"
+            # Clean content without header for better presentation
+            right_content = f"{translated_text}{source_footer}"
             await send_message_parts(dst_channel_to_use, right_content, image_data, image_url_str)
             logger.info(f"Posted right-bidlo version")
         
