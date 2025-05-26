@@ -11,7 +11,7 @@ import asyncio
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'app'))
 
 from article_extractor import extract_article
-from translator import get_openai_client, translate_text
+from translator import get_anthropic_client, translate_text
 
 import pytest
 
@@ -48,14 +48,14 @@ async def test_article_extraction_integration():
     assert test_url in translation_context, "Context should include the URL"
     assert article_text in translation_context, "Context should include article text"
     
-    # Test translation (requires OpenAI API key)
-    api_key = os.getenv('OPENAI_API_KEY')
+    # Test translation (requires Anthropic API key)
+    api_key = os.getenv('ANTHROPIC_API_KEY')
     if not api_key:
-        print("⚠️  No OPENAI_API_KEY found, skipping translation test")
+        print("⚠️  No ANTHROPIC_API_KEY found, skipping translation test")
         print("✅ Integration structure looks correct!")
-        pytest.skip("No OpenAI API key available for translation test")
+        pytest.skip("No Anthropic API key available for translation test")
     
-    client = get_openai_client(api_key)
+    client = get_anthropic_client(api_key)
     translated = await translate_text(client, translation_context, 'left')
     
     print(f"\n=== Translation Result ===")

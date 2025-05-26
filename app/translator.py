@@ -4,17 +4,17 @@ Shared translation functionality for the Telegram Zoomer Bot
 
 import os
 import logging
-import openai
+import anthropic
 import time
 from tenacity import retry, stop_after_attempt, wait_exponential, before_sleep_log
 
 logger = logging.getLogger(__name__)
 
-# Initialize OpenAI client - will use the OPENAI_API_KEY from environment
-def get_openai_client(api_key):
-    """Initialize the OpenAI client with the given API key"""
-    logger.info("Initializing OpenAI client")
-    return openai.OpenAI(api_key=api_key)
+# Initialize Anthropic client - will use the ANTHROPIC_API_KEY from environment
+def get_anthropic_client(api_key):
+    """Initialize the Anthropic client with the given API key"""
+    logger.info("Initializing Anthropic Claude client")
+    return anthropic.Anthropic(api_key=api_key)
 
 def get_prompt(style):
     """Get the appropriate prompt based on translation style"""
@@ -62,7 +62,7 @@ def get_prompt(style):
     before_sleep=before_sleep_log(logger, logging.WARNING)
 )
 async def translate_text(client, text, style='left'):
-    """Translate text with exponential backoff retry logic"""
+    """Translate text using Claude Sonnet 4 with exponential backoff retry logic"""
     try:
         start_time = time.time()
         logger.info(f"Starting translation for {len(text)} characters of text")
@@ -75,23 +75,23 @@ async def translate_text(client, text, style='left'):
         log_text = text[:100] + "..." if len(text) > 100 else text
         logger.info(f"Text to translate (truncated): {log_text}")
         
-        # Make the API call
-        logger.info(f"Sending request to OpenAI API using model: gpt-4o")
+        # Make the API call to Claude Sonnet 4
+        logger.info(f"Sending request to Anthropic API using model: claude-sonnet-4-20250514")
         api_start = time.time()
-        resp = client.chat.completions.create(
-            model="gpt-4o",
+        resp = client.messages.create(
+            model="claude-sonnet-4-20250514",  # Using latest Claude Sonnet 4
+            max_tokens=1000,
+            temperature=0.7,  # Claude works well with lower temperature
+            system=prompt,
             messages=[
-                {"role": "system", "content": prompt},
                 {"role": "user", "content": text}
-            ],
-            max_tokens=800,
-            temperature=0.85  # Increased from 0.7 to add more creativity/humor
+            ]
         )
         api_time = time.time() - api_start
-        logger.info(f"OpenAI API call completed in {api_time:.2f} seconds")
+        logger.info(f"Anthropic API call completed in {api_time:.2f} seconds")
         
         # Extract and return the result
-        result = resp.choices[0].message.content.strip()
+        result = resp.content[0].text.strip()
         total_time = time.time() - start_time
         
         result_snippet = result[:100] + "..." if len(result) > 100 else result
@@ -105,6 +105,6 @@ async def translate_text(client, text, style='left'):
         
         return result
     except Exception as e:
-        logger.error(f"OpenAI API error: {str(e)}", exc_info=True)
+        logger.error(f"Anthropic API error: {str(e)}", exc_info=True)
         logger.error(f"Failed to translate text of length {len(text)}")
         raise 

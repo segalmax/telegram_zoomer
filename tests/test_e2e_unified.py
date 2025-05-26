@@ -33,7 +33,7 @@ import pytest # Added pytest
 # Adjust sys.path if necessary, or install the app as a package
 # For now, direct import if 'app' is discoverable (e.g. via PYTHONPATH or project structure)
 import app.bot
-from app.translator import get_openai_client, translate_text
+from app.translator import get_anthropic_client, translate_text
 from app.image_generator import generate_image_for_post, generate_image_with_stability_ai
 # Original bot.main is renamed to bot_main_entry for clarity to avoid confusion with this script's previous main
 from app.bot import main as bot_main_entry, translate_and_post as original_bot_translate_and_post
@@ -64,7 +64,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__) # Use __name__ for specific logger
 
 # Configuration
-OPENAI_KEY = os.getenv('OPENAI_API_KEY')
+ANTHROPIC_KEY = os.getenv('ANTHROPIC_API_KEY')
 TEST_MESSAGE = (
     "BREAKING NEWS: Scientists discover remarkable new species of bioluminescent deep-sea creatures "
     "near hydrothermal vents in the Pacific Ocean. The colorful organisms have evolved unique "
@@ -90,9 +90,9 @@ if TEST_DST_CHANNEL:
 
 @pytest.mark.asyncio
 async def test_api_translations(test_args):
-    """Test translation functionality with OpenAI."""
-    client = get_openai_client(OPENAI_KEY)
-    assert client, "OpenAI client could not be initialized. Check OPENAI_API_KEY."
+    """Test translation functionality with Anthropic Claude."""
+    client = get_anthropic_client(ANTHROPIC_KEY)
+    assert client, "Anthropic client could not be initialized. Check ANTHROPIC_API_KEY."
     logger.info("Testing RIGHT style translation...")
     right_result = await translate_text(client, TEST_MESSAGE, 'right')
     assert right_result and len(right_result) > 10, "RIGHT translation failed or returned empty/short result"
@@ -106,7 +106,13 @@ async def test_api_image_generation_dalle(test_args):
     if test_args.stability:
         pytest.skip("Skipping DALL-E test when --stability is enabled")
 
-    client = get_openai_client(OPENAI_KEY)
+    # Image generation still uses OpenAI for DALL-E
+    openai_key = os.getenv('OPENAI_API_KEY')
+    if not openai_key:
+        pytest.skip("OPENAI_API_KEY not found, skipping DALL-E test")
+    
+    from app.image_generator import get_openai_client
+    client = get_openai_client(openai_key)
     assert client, "OpenAI client could not be initialized. Check OPENAI_API_KEY."
     logger.info("Testing DALL-E image generation...")
     longer_test_text = (

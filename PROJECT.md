@@ -514,6 +514,26 @@ python -m pytest tests/ -v
 
 ### Key Technical Insights from Task 12 Implementation
 
+#### Translation Model Upgrade (Subtask 12.20) ✅ COMPLETED & UPGRADED TO CLAUDE SONNET 4
+- **Research**: Claude Sonnet 4 (May 2025) is the latest model with major improvements in coding, reasoning, and instruction following
+- **Benefits**: 
+  - Superior instruction following vs GPT-4o and Claude 3.5
+  - More natural language output and reduced translation errors
+  - Better coding capabilities and advanced reasoning
+  - Improved memory and tool use capabilities
+- **Cost**: Same pricing as Claude 3.5 ($3/$15 per million tokens) but significantly better quality
+- **Implementation**: 
+  ```python
+  # Using latest Claude Sonnet 4
+  from app.translator import get_anthropic_client, translate_text
+  anthropic_client = get_anthropic_client(ANTHROPIC_KEY)
+  # Now uses claude-sonnet-4-20250514 model
+  translated_text = await translate_text(anthropic_client, text, 'right')
+  ```
+- **Environment**: Requires `ANTHROPIC_API_KEY` 
+- **Dependencies**: `anthropic==0.40.0` (compatible with Claude Sonnet 4)
+- **Status**: ✅ Upgraded to Claude Sonnet 4, all tests passing, latest model in production
+
 #### Hyperlink Formatting (Subtask 12.17)
 - **Problem**: Links showed full URLs instead of clean hyperlinks
 - **Solution**: Use `[text](url)` markdown format with `parse_mode='md'` in all `send_message` calls

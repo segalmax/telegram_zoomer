@@ -15,9 +15,9 @@ from telethon import TelegramClient, events
 from telethon.network import ConnectionTcpFull, ConnectionTcpAbridged, ConnectionTcpIntermediate
 from telethon.sessions import StringSession
 from telethon import utils
-import openai
+import anthropic
 from dotenv import load_dotenv
-from .translator import get_openai_client, translate_text
+from .translator import get_anthropic_client, translate_text
 from .image_generator import generate_image_for_post
 from .session_manager import setup_session, load_app_state, save_app_state
 from telethon.tl.functions.account import UpdateStatusRequest
@@ -56,7 +56,7 @@ SRC_CHANNEL = os.getenv('SRC_CHANNEL')
 DST_CHANNEL = os.getenv('DST_CHANNEL')
 TRANSLATION_STYLE = os.getenv('TRANSLATION_STYLE', 'right')  # right only by default
 GENERATE_IMAGES = os.getenv('GENERATE_IMAGES', 'true').lower() == 'true'
-OPENAI_KEY = os.getenv('OPENAI_API_KEY')
+ANTHROPIC_KEY = os.getenv('ANTHROPIC_API_KEY')
 PROCESS_RECENT = os.getenv('PROCESS_RECENT', 0)
 CHECK_CHANNEL_INTERVAL = int(os.getenv('CHECK_CHANNEL_INTERVAL', '300'))  # Default to 5 minutes
 KEEP_ALIVE_INTERVAL = int(os.getenv('KEEP_ALIVE_INTERVAL', '60'))  # Keep connection alive every minute
@@ -99,9 +99,9 @@ if os.getenv('TEST_MODE', 'false').lower() == 'true':
 try:
     API_ID = int(os.getenv('TG_API_ID'))
     API_HASH = os.getenv('TG_API_HASH')
-    OPENAI_KEY = os.getenv('OPENAI_API_KEY')
+    ANTHROPIC_KEY = os.getenv('ANTHROPIC_API_KEY')
 except (TypeError, ValueError) as e:
-    logger.error(f"Error: TG_API_ID, TG_API_HASH, or OPENAI_API_KEY is not set correctly in .env: {e}")
+    logger.error(f"Error: TG_API_ID, TG_API_HASH, or ANTHROPIC_API_KEY is not set correctly in .env: {e}")
     sys.exit("Critical environment variables missing or invalid. Exiting.")
 
 TG_PHONE = os.getenv('TG_PHONE') # Optional, bot will prompt
@@ -113,13 +113,13 @@ if not SRC_CHANNEL or not DST_CHANNEL:
     logger.error("Error: SRC_CHANNEL or DST_CHANNEL is not set in .env.")
     sys.exit("Source/Destination channel environment variables missing. Exiting.")
 
-# Initialize OpenAI client
-openai_client = None
-if OPENAI_KEY:
-    openai_client = get_openai_client(OPENAI_KEY)
+# Initialize Anthropic client
+anthropic_client = None
+if ANTHROPIC_KEY:
+    anthropic_client = get_anthropic_client(ANTHROPIC_KEY)
 else:
-    logger.error("OPENAI_API_KEY not found. OpenAI related functions will fail.")
-    # Decide if this is fatal or if bot can run without OpenAI (e.g. only relaying)
+    logger.error("ANTHROPIC_API_KEY not found. Translation functions will fail.")
+    # Decide if this is fatal or if bot can run without Anthropic (e.g. only relaying)
 
 async def translate_and_post(client_instance, txt, message_id=None, destination_channel=None, message_entity_urls=None):
     # Renamed client to client_instance to avoid conflict with openai_client module
@@ -138,20 +138,10 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
         # has already been imported.
         generate_images = os.getenv("GENERATE_IMAGES", "true").lower() == "true"
 
-        if generate_images and openai_client:
-            logger.info("Generating image for post...")
-            result = await generate_image_for_post(openai_client, txt)
-            if result:
-                if isinstance(result, str):
-                    image_url_str = result
-                    logger.info("Using image URL instead of direct upload")
-                else:
-                    image_data = result
-                    logger.info("Image data received successfully")
-            else:
-                logger.warning("No image result was returned")
-        elif not openai_client and generate_images:
-            logger.warning("Image generation is enabled, but OpenAI client is not initialized (missing API key?).")
+        # Note: Image generation still requires OpenAI, so we'll skip it for now with Claude
+        # TODO: Implement image generation with Claude or keep separate OpenAI client for images
+        if generate_images:
+            logger.warning("Image generation temporarily disabled during Claude translation upgrade")
 
         # Get the original message link format: https://t.me/c/CHANNEL_ID/MESSAGE_ID
         # or for public channels: https://t.me/CHANNEL_NAME/MESSAGE_ID
@@ -186,9 +176,9 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
         # Get translation style from environment (default to 'both')
         translation_style = os.getenv("TRANSLATION_STYLE", "right").lower()
 
-        # Check for OpenAI client *before* attempting to translate
-        if not openai_client:
-            logger.error("Cannot translate without OpenAI client.")
+        # Check for Anthropic client *before* attempting to translate
+        if not anthropic_client:
+            logger.error("Cannot translate without Anthropic client.")
             return False
         
         # Append links information and article content to the original text for context
@@ -209,7 +199,7 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
         
         if translation_style == 'right' or translation_style == 'both':
             logger.info("Translating in RIGHT-BIDLO style...")
-            translated_text = await translate_text(openai_client, translation_context, 'right')
+            translated_text = await translate_text(anthropic_client, translation_context, 'right')
             
             # Clean content without header for better presentation
             right_content = f"{translated_text}{source_footer}"
@@ -218,7 +208,7 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
         
         if translation_style == 'left' or translation_style == 'both':
             logger.info("Translating in LEFT-ZOOMER style...")
-            translated_text = await translate_text(openai_client, translation_context, 'left')
+            translated_text = await translate_text(anthropic_client, translation_context, 'left')
             
             # Combine header with translated content
             left_content = f"🔵 LEFT-ZOOMER VERSION:\n\n{translated_text}{source_footer}"
@@ -738,14 +728,6 @@ async def main():
     args = parser.parse_args()
     
     try:
-        # Initialize OpenAI client
-        global openai_client
-        openai_api_key = os.getenv('OPENAI_API_KEY')
-        if openai_api_key:
-            openai_client = get_openai_client(openai_api_key)
-        else:
-            logger.warning("No OpenAI API key found. Image generation and translation will be disabled.")
-        
         # Create Telegram client
         logger.info(f"Creating Telegram client with session: {SESSION}")
         client = TelegramClient(

@@ -15,12 +15,18 @@ from io import BytesIO
 import platform
 from dotenv import load_dotenv
 from pathlib import Path
+import openai
 
 project_root = Path(__file__).resolve().parent.parent
 load_dotenv(dotenv_path=project_root / 'app_settings.env', override=True)
 load_dotenv(dotenv_path=project_root / '.env', override=False)
 
 logger = logging.getLogger(__name__)
+
+def get_openai_client(api_key):
+    """Initialize the OpenAI client with the given API key"""
+    logger.info("Initializing OpenAI client for image generation")
+    return openai.OpenAI(api_key=api_key)
 
 async def generate_image_with_stability_ai(text, style="cartoon"):
     """Generate an image using Stability AI API based on post content"""
