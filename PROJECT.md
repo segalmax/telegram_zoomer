@@ -109,13 +109,37 @@
 - [x] Background keep-alive processes to maintain Telegram connection
 - [x] End-to-end automated tests with Telegram authentication
 
-## Task 12: Improve Post Quality ✅ COMPLETED
+## Task 12: Improve Post Quality ✅ COMPLETED & DEPLOYED
 - [x] **Remove RIGHT-BIDLO header** - Cleaner post presentation without redundant headers
 - [x] **Simplify translation style** - Streamlined to use only right-bidlo style for consistency
 - [x] **Add safety check for translations** - Second LLM call to verify content appropriateness before posting
 - [x] **Fix duplicate links issue** - Resolved duplicate "Оригинал" links, clean two-link structure
 - [x] **Format links as hyperlinks** - Proper markdown hyperlinks hiding full URLs
 - [x] **Upgrade translation model** - Migrated to Claude Sonnet 4 (May 2025) for superior translation quality
+
+**✅ DEPLOYED TO PRODUCTION** (Heroku release v51, commit a67360e)
+
+## Next Priority Tasks
+
+### 🎯 **Task 13: User Experience & Analytics** (RECOMMENDED NEXT)
+- [ ] Add usage analytics and monitoring
+- [ ] Implement user feedback collection
+- [ ] Add translation quality metrics
+- [ ] Create admin dashboard for bot statistics
+
+### 🔧 **Task 14: Technical Improvements**
+- [ ] Migrate from deprecated `runtime.txt` to `.python-version`
+- [ ] Add automated testing pipeline (GitHub Actions)
+- [ ] Implement rate limiting and error recovery
+- [ ] Add health check endpoints
+
+### 📱 **Task 15: Feature Expansion**
+- [ ] Support for other news sources beyond NYT
+- [ ] Add translation to other languages/styles
+- [ ] Implement user preferences and customization
+- [ ] Add scheduled posting features
+
+**RECOMMENDATION**: Start with Task 13 to understand how users interact with the bot and measure translation quality before adding more features.
 
 ## Heroku Deployment Status
 - [x] **Successfully deployed to Heroku**
