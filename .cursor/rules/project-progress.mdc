@@ -13,3 +13,19 @@ alwaysApply: true
 - Maintain a clean separation between local development and production deployment
 - For Heroku deployment changes, always update setup_heroku.sh to reflect new environment variables
 - Keep export_session.py up-to-date for session management
+
+## HEROKU ENVIRONMENT VARIABLE UPDATES
+**NEVER manually set Heroku config vars with `heroku config:set`!**
+**ALWAYS use the dedicated setup script: `./setup_heroku.sh`**
+
+The setup_heroku.sh script:
+- Automatically reads from both .env (secrets) and app_settings.env (settings)
+- Deploys ALL environment variables to Heroku in one command
+- Handles session compression and state management
+- Cleans up obsolete variables
+- Is the ONLY way to update Heroku environment variables
+
+When environment variables change:
+1. Update .env (for secrets like API keys) or app_settings.env (for settings)
+2. Run `./setup_heroku.sh` to deploy to Heroku
+3. Check `heroku logs --tail --app nyt-zoomer-bot` to verify deployment

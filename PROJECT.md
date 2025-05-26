@@ -514,7 +514,7 @@ python -m pytest tests/ -v
 
 ### Key Technical Insights from Task 12 Implementation
 
-#### Translation Model Upgrade (Subtask 12.20) ✅ COMPLETED & UPGRADED TO CLAUDE SONNET 4
+#### Translation Model Upgrade (Subtask 12.20) ✅ COMPLETED & DEPLOYED TO PRODUCTION
 - **Research**: Claude Sonnet 4 (May 2025) is the latest model with major improvements in coding, reasoning, and instruction following
 - **Benefits**: 
   - Superior instruction following vs GPT-4o and Claude 3.5
@@ -532,7 +532,13 @@ python -m pytest tests/ -v
   ```
 - **Environment**: Requires `ANTHROPIC_API_KEY` 
 - **Dependencies**: `anthropic==0.40.0` (compatible with Claude Sonnet 4)
-- **Status**: ✅ Upgraded to Claude Sonnet 4, all tests passing, latest model in production
+- **Production Deployment**: ✅ Deployed to Heroku using `./setup_heroku.sh`
+- **Status**: ✅ Claude Sonnet 4 running in production, all tests passing, latest AI model active
+
+#### Heroku Environment Variable Management
+- **Process**: Always use `./setup_heroku.sh` script (documented in .cursor/rules/project-progress.mdc)
+- **Never**: Manually set Heroku config vars with `heroku config:set`
+- **Script Benefits**: Reads both .env and app_settings.env, handles compression, cleans obsolete vars
 
 #### Hyperlink Formatting (Subtask 12.17)
 - **Problem**: Links showed full URLs instead of clean hyperlinks
