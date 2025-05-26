@@ -14,6 +14,7 @@ from pathlib import Path
 from telethon import TelegramClient, events
 from telethon.network import ConnectionTcpFull, ConnectionTcpAbridged, ConnectionTcpIntermediate
 from telethon.sessions import StringSession
+from telethon import utils
 import openai
 from dotenv import load_dotenv
 from .translator import get_openai_client, translate_text
@@ -158,28 +159,29 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
         logger.info(f"Original message link: {message_link}")
 
         # Include both the original message link and any extracted URLs from message entities
-        source_footer = f"\n\n🔗 Оригинал: {message_link}"
+        # Format as hyperlinks to hide the full URLs
+        source_footer = f"\n\n🔗 [Оригинал]({message_link})"
         
         # Add extracted links from message entities if available
         if message_entity_urls and len(message_entity_urls) > 0:
-            source_footer += f"\n🔗 Ссылка из статьи: {message_entity_urls[0]}"
+            source_footer += f"\n🔗 [Ссылка из статьи]({message_entity_urls[0]})"
             logger.info(f"Including extracted URL from message: {message_entity_urls[0]}")
         
         async def send_message_parts(channel, text_content, image_file=None, image_url_link=None):
             if image_file:
                 # Use up to 1024 characters for caption
                 caption = text_content[:1024]
-                await client_instance.send_file(channel, image_file, caption=caption)
+                await client_instance.send_file(channel, image_file, caption=caption, parse_mode='md')
                 # If text is too long for caption, send the rest as a separate message
                 if len(text_content) > 1024:
                     remaining_text = text_content[1024:]
                     if remaining_text.strip(): # ensure remaining_text actually has content
-                        await client_instance.send_message(channel, remaining_text)
+                        await client_instance.send_message(channel, remaining_text, parse_mode='md')
             elif image_url_link:
                 full_message = f"{text_content}\\n\\n🖼️ {image_url_link}"
-                await client_instance.send_message(channel, full_message)
+                await client_instance.send_message(channel, full_message, parse_mode='md')
             else:
-                await client_instance.send_message(channel, text_content)
+                await client_instance.send_message(channel, text_content, parse_mode='md')
 
         # Get translation style from environment (default to 'both')
         translation_style = os.getenv("TRANSLATION_STYLE", "right").lower()
@@ -621,8 +623,12 @@ async def poll_big_channel(client, channel_username):
                                         message_entity_urls.append(url_text)
                     
                     # Process this latest message if it has text
-                    if msg.text:
+                    # In test mode, only process if it contains the test prefix
+                    test_prefix = os.getenv('TEST_RUN_MESSAGE_PREFIX')
+                    if msg.text and (not test_prefix or test_prefix in msg.text):
                         await translate_and_post(client, msg.text, msg.id, message_entity_urls=message_entity_urls)
+                    elif test_prefix and msg.text:
+                        logger.info(f"Test mode: Skipping latest message ID {msg.id} (no test prefix)")
                     
                     # Try to get the dialog to get PTS
                     dialogs = await client.get_dialogs()
@@ -675,8 +681,19 @@ async def poll_big_channel(client, channel_username):
                 # Process new messages
                 if hasattr(channel_diff, 'new_messages'):
                     logger.info(f"Channel difference returned {len(channel_diff.new_messages)} new messages")
+                    
+                    # In test mode, only process messages with the test prefix
+                    test_prefix = os.getenv('TEST_RUN_MESSAGE_PREFIX')
+                    if test_prefix:
+                        logger.info(f"Test mode: Looking for messages with prefix '{test_prefix}'")
+                    
                     for msg in channel_diff.new_messages:
                         if hasattr(msg, 'message') and msg.message:
+                            # In test mode, skip messages that don't have the test prefix
+                            if test_prefix and test_prefix not in msg.message:
+                                logger.info(f"Test mode: Skipping message ID {msg.id} (no test prefix)")
+                                continue
+                                
                             logger.info(f"Processing new message ID: {msg.id}")
                             processing_message = True
                             

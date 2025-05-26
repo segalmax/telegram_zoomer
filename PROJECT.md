@@ -432,3 +432,28 @@ FUNCTION handle_new_message(event):
         LOG "Processing new message"
         CALL translate_and_post(client, text, message_id)
 ```
+
+## Testing
+
+### Running All Tests
+```bash
+# Run standard pytest tests
+python -m pytest tests/ -v
+
+# Run polling test (tests the full bot polling mechanism)
+./tests/test_polling_flow.sh
+```
+
+### Test Types
+- **Unit Tests**: `test_article_extractor.py`, `test_integration.py`
+- **E2E Tests**: `test_e2e_unified.py` (includes API, image generation, telegram pipeline)
+- **Polling Test**: `test_polling_flow.sh` (full bot polling mechanism with real message sending)
+
+**Important**: The polling test requires the shell script `test_polling_flow.sh` which:
+1. Sends a test message to the test channel with a unique prefix
+2. Starts the bot in background with test mode enabled
+3. Bot only processes messages with the test prefix (optimized for speed)
+4. Verifies the bot processes the message via polling
+5. Cleans up processes and sessions
+
+**Note**: The bot is optimized for test mode - when `TEST_RUN_MESSAGE_PREFIX` is set, it only processes messages containing that prefix, making tests fast and reliable.
