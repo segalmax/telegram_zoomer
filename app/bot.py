@@ -17,7 +17,7 @@ from telethon.sessions import StringSession
 from telethon import utils
 import anthropic
 from dotenv import load_dotenv
-from .translator import get_anthropic_client, translate_text
+from .translator import get_anthropic_client, translate_text, safety_check_translation
 from .image_generator import generate_image_for_post
 from .session_manager import setup_session, load_app_state, save_app_state
 from telethon.tl.functions.account import UpdateStatusRequest
@@ -201,19 +201,29 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
             logger.info("Translating in RIGHT-BIDLO style...")
             translated_text = await translate_text(anthropic_client, translation_context, 'right')
             
-            # Clean content without header for better presentation
-            right_content = f"{translated_text}{source_footer}"
-            await send_message_parts(dst_channel_to_use, right_content, image_data, image_url_str)
-            logger.info(f"Posted right-bidlo version")
+            # Perform safety check before posting
+            is_safe = await safety_check_translation(anthropic_client, translated_text)
+            if not is_safe:
+                logger.warning("RIGHT-BIDLO translation failed safety check, skipping post")
+            else:
+                # Clean content without header for better presentation
+                right_content = f"{translated_text}{source_footer}"
+                await send_message_parts(dst_channel_to_use, right_content, image_data, image_url_str)
+                logger.info(f"Posted right-bidlo version")
         
         if translation_style == 'left' or translation_style == 'both':
             logger.info("Translating in LEFT-ZOOMER style...")
             translated_text = await translate_text(anthropic_client, translation_context, 'left')
             
-            # Combine header with translated content
-            left_content = f"🔵 LEFT-ZOOMER VERSION:\n\n{translated_text}{source_footer}"
-            await send_message_parts(dst_channel_to_use, left_content, None, None)
-            logger.info(f"Posted left-zoomer version")
+            # Perform safety check before posting
+            is_safe = await safety_check_translation(anthropic_client, translated_text)
+            if not is_safe:
+                logger.warning("LEFT-ZOOMER translation failed safety check, skipping post")
+            else:
+                # Combine header with translated content
+                left_content = f"🔵 LEFT-ZOOMER VERSION:\n\n{translated_text}{source_footer}"
+                await send_message_parts(dst_channel_to_use, left_content, None, None)
+                logger.info(f"Posted left-zoomer version")
         
         logger.info(f"Total processing time for message: {time.time() - start_time:.2f} seconds")
         return True
