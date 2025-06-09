@@ -1,0 +1,6 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+- you must always run all tests in tests finishing a task master task!

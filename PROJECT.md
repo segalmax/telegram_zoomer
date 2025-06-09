@@ -371,14 +371,30 @@ python test.py --new-session
 
 ## Development Workflow Rules
 
+### Virtual Environment Management
+⚠️ **ALWAYS USE VIRTUAL ENVIRONMENT FOR DEVELOPMENT!**
+
+```bash
+# Create virtual environment from scratch (if needed):
+rm -rf .venv && /opt/miniconda3/bin/python -m venv .venv
+
+# Install dependencies in virtual environment:
+source .venv/bin/activate && pip install -r requirements.txt pytest pytest-asyncio
+
+# ALL development work must be done in virtual environment:
+source .venv/bin/activate
+```
+
+**Critical Rule**: NEVER run Python commands outside the virtual environment. This ensures dependency isolation and consistent behavior across local development and production.
+
 ### Pre-Commit Requirements
 ⚠️ **ALWAYS RUN TESTS BEFORE COMMITS!**
 
 ```bash
-# Required before any git commit:
-source .env && tests/test_polling_flow.sh
+# Required before any git commit (ALWAYS activate venv first):
+source .venv/bin/activate && source .env && tests/test_polling_flow.sh
 # OR
-pytest tests/
+source .venv/bin/activate && python -m pytest tests/ -v
 ```
 
 All tests must pass before committing changes. This prevents regressions and ensures production stability.
@@ -469,11 +485,14 @@ FUNCTION handle_new_message(event):
 
 ### Running All Tests
 ```bash
+# ALWAYS activate virtual environment first
+source .venv/bin/activate
+
 # Run standard pytest tests
 python -m pytest tests/ -v
 
 # Run polling test (tests the full bot polling mechanism)
-./tests/test_polling_flow.sh
+source .env && tests/test_polling_flow.sh
 ```
 
 ### Test Types
@@ -495,11 +514,14 @@ python -m pytest tests/ -v
 ### Testing Protocol
 1. **Always run ALL tests before commits**:
    ```bash
+   # FIRST: Activate virtual environment
+   source .venv/bin/activate
+   
    # Standard pytest tests
    python -m pytest tests/ -v
    
    # Polling mechanism test (shell script, not pytest)
-   ./tests/test_polling_flow.sh
+   source .env && tests/test_polling_flow.sh
    ```
 
 2. **Test Types Understanding**:
