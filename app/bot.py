@@ -28,6 +28,8 @@ from datetime import datetime, timedelta
 import random
 import argparse
 from .pts_manager import get_pts, update_pts
+from .vector_store import recall as recall_tm, save_pair as store_tm
+from .article_extractor import extract_article
 
 # Load environment variables explicitly from project root.
 # Order of loading determines precedence for non-secret variables if keys overlap.
@@ -181,19 +183,27 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
             logger.error("Cannot translate without Anthropic client.")
             return False
         
-        # Append links information and article content to the original text for context
+        # ------------- translation-memory context ----------------
         translation_context = txt
+        try:
+            memory = recall_tm(txt, k=5)
+            if memory:
+                mem_block = "\n".join(
+                    f"- Source: {m['source_text']}\n  Translation: {m['translation_text']}" for m in memory
+                )
+                translation_context = (
+                    "Previous translations for consistency:\n" f"{mem_block}\n\n" + translation_context
+                )
+        except Exception as e:
+            logger.warning(f"TM recall failed: {e}")
+        
+        # Append article content (runs after TM injection, before translation)
         if message_entity_urls and len(message_entity_urls) > 0:
-            # Try to extract article content from the first URL
-            from .article_extractor import extract_article
             article_text = extract_article(message_entity_urls[0])
-            
             if article_text:
-                # Include article content for better translation context
                 translation_context += f"\n\nArticle content from {message_entity_urls[0]}:\n{article_text}"
                 logger.info(f"Added article content ({len(article_text)} chars) to translation context")
             else:
-                # Fallback to just mentioning the link
                 translation_context += f"\n\nNote: This message contains a link: {message_entity_urls[0]}"
                 logger.info("Article extraction failed, using fallback link mention")
         
@@ -206,6 +216,11 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
             right_content = f"{translated_text}{source_footer}"
             await send_message_parts(dst_channel_to_use, right_content, image_data, image_url_str)
             logger.info(f"Posted right-bidlo version")
+            # Persist pair in translation memory (best-effort)
+            try:
+                store_tm(src=txt, tgt=translated_text, pair_id=f"{message_id}-right" if message_id else str(uuid.uuid4()))
+            except Exception as e:
+                logger.warning(f"TM save failed: {e}")
         
         if translation_style == 'left' or translation_style == 'both':
             logger.info("Translating in LEFT-ZOOMER style...")
@@ -313,7 +328,6 @@ async def process_recent_posts(client_instance, limit=10, timeout=300):
                             url_text = msg.text[entity.offset:entity.offset + entity.length]
                             if url_text.startswith('http'):
                                 message_entity_urls.append(url_text)
-                                logger.info(f"Extracted URL from text: {url_text}")
                             else:
                                 logger.info(f"Found URL-like entity but not a valid URL: {url_text}")
             

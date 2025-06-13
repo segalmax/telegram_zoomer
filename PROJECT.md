@@ -69,8 +69,9 @@ TRANSLATION_STYLE=right               # fixed style
 GENERATE_IMAGES=true|false
 USE_STABILITY_AI=true|false
 TG_COMPRESSED_SESSION_STRING          # auto-generated
+SUPABASE_URL, SUPABASE_KEY           # Supabase Postgres instance
+EMBED_MODEL                           # optional, default text-embedding-ada-002
 ```
-Update any variable → run `./setup_heroku.sh`.
 
 ---
 

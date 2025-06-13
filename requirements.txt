@@ -36,3 +36,4 @@ tqdm==4.67.1
 typing_extensions==4.13.2
 urllib3==2.2.3
 yarl==1.15.2
+supabase==2.3.3
