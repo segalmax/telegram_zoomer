@@ -152,7 +152,7 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
 
         # Include both the original message link and any extracted URLs from message entities
         # Format as hyperlinks to hide the full URLs
-        source_footer = f"\n\n🔗 [Оригинал]({message_link})"
+        source_footer = f"\n\n🔗 [Оригинал:]({message_link})"
         
         # Add extracted links from message entities if available
         if message_entity_urls and len(message_entity_urls) > 0:
