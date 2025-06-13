@@ -7,6 +7,7 @@ import os
 import asyncio
 import sys
 from pathlib import Path
+import pytest
 
 # Add the project root to Python path
 project_root = Path(__file__).resolve().parent
@@ -18,6 +19,7 @@ from app.translator import get_anthropic_client, translate_text
 # Load environment variables
 load_dotenv()
 
+@pytest.mark.asyncio
 async def test_claude_translation():
     """Test Claude translation functionality"""
     
