@@ -50,6 +50,7 @@ if create_client and SUPABASE_URL and SUPABASE_KEY:
         _sb = None
 else:
     logger.info("Supabase vector store disabled – missing env or dependency")
+    logger.warning("Supabase vector store disabled – missing env vars or supabase library; running without TM")
 
 # ---------------------------------------------------------------------------
 # Helpers
