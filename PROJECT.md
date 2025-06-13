@@ -103,6 +103,7 @@ Update any variable → run `./setup_heroku.sh`.
 - Robust pytest suite
 
 ### 🔄 In Progress / Next
+- **Task 26**: Translation memory (Supabase pgvector) – HIGH PRIORITY
 - **Task 13**: Analytics & feedback
 - **Task 14**: CI + rate limiting
 - **Task 15**: Multi-source news, preferences
