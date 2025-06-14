@@ -36,5 +36,10 @@ tqdm==4.67.1
 typing_extensions==4.13.2
 urllib3==2.2.3
 yarl==1.15.2
-supabase==2.3.3
 pytest-asyncio==0.23.6
+supabase==2.15.3
+gotrue==2.12.0
+postgrest==1.0.2
+realtime==2.4.3
+storage3==0.11.3
+supafunc==0.9.4

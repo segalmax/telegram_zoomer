@@ -30,6 +30,7 @@ import argparse
 from .pts_manager import get_pts, update_pts
 from .vector_store import recall as recall_tm, save_pair as store_tm
 from .article_extractor import extract_article
+from .analytics import analytics
 
 # Load environment variables explicitly from project root.
 # Order of loading determines precedence for non-secret variables if keys overlap.
@@ -129,6 +130,10 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
         start_time = time.time()
         logger.info(f"Starting translation and posting for message ID: {message_id}")
         
+        # Start analytics session
+        article_url = message_entity_urls[0] if message_entity_urls else None
+        session_id = analytics.start_session(str(message_id) if message_id else None, txt, article_url)
+        
         dst_channel_to_use = destination_channel or DST_CHANNEL
         logger.info(f"Using destination channel: {dst_channel_to_use}")
         
@@ -185,17 +190,53 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
         
         # ------------- translation-memory context ----------------
         translation_context = txt
+        memory_start_time = time.time()
         try:
-            memory = recall_tm(txt, k=5)
+            logger.info(f"🧠 Querying translation memory for message {message_id} (k=10)")
+            logger.debug(f"🔍 Query text preview: {txt[:100]}...")
+            
+            memory = recall_tm(txt, k=10)  # Increased from k=5 to k=10
+            memory_query_time = time.time() - memory_start_time
+            
             if memory:
+                logger.info(f"✅ Found {len(memory)} relevant memories in {memory_query_time:.3f}s")
+                
+                # Log detailed memory analysis
+                for i, m in enumerate(memory, 1):
+                    similarity = m.get('similarity', 0.0)
+                    source_preview = m.get('source_text', '')[:60] + "..." if len(m.get('source_text', '')) > 60 else m.get('source_text', '')
+                    translation_preview = m.get('translation_text', '')[:60] + "..." if len(m.get('translation_text', '')) > 60 else m.get('translation_text', '')
+                    logger.info(f"  📝 Memory {i}: similarity={similarity:.3f}")
+                    logger.debug(f"    Source: {source_preview}")
+                    logger.debug(f"    Translation: {translation_preview}")
+                
+                # Calculate memory statistics
+                similarities = [m.get('similarity', 0.0) for m in memory]
+                avg_similarity = sum(similarities) / len(similarities) if similarities else 0
+                max_similarity = max(similarities) if similarities else 0
+                min_similarity = min(similarities) if similarities else 0
+                
+                logger.info(f"📊 Memory stats: avg_sim={avg_similarity:.3f}, max_sim={max_similarity:.3f}, min_sim={min_similarity:.3f}")
+                
+                # Track memory metrics in analytics
+                analytics.set_memory_metrics(memory, int(memory_query_time * 1000))
+                analytics.track_memory_usage(session_id, memory)
+                
                 mem_block = "\n".join(
                     f"- Source: {m['source_text']}\n  Translation: {m['translation_text']}" for m in memory
                 )
                 translation_context = (
                     "Previous translations for consistency:\n" f"{mem_block}\n\n" + translation_context
                 )
+                
+                logger.info(f"🔄 Enhanced translation context: {len(translation_context)} chars (added {len(mem_block)} chars from memory)")
+            else:
+                logger.warning(f"❌ No memories found for message {message_id} in {memory_query_time:.3f}s")
+                analytics.set_memory_metrics([], int(memory_query_time * 1000))
+                
         except Exception as e:
-            logger.warning(f"TM recall failed: {e}")
+            memory_query_time = time.time() - memory_start_time
+            logger.error(f"💥 TM recall failed for message {message_id} after {memory_query_time:.3f}s: {e}", exc_info=True)
         
         # Append article content (runs after TM injection, before translation)
         if message_entity_urls and len(message_entity_urls) > 0:
@@ -203,13 +244,19 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
             if article_text:
                 translation_context += f"\n\nArticle content from {message_entity_urls[0]}:\n{article_text}"
                 logger.info(f"Added article content ({len(article_text)} chars) to translation context")
+                analytics.set_article_content(article_text)
             else:
                 translation_context += f"\n\nNote: This message contains a link: {message_entity_urls[0]}"
                 logger.info("Article extraction failed, using fallback link mention")
         
         if translation_style == 'right' or translation_style == 'both':
             logger.info("Translating in RIGHT-BIDLO style...")
+            translation_start = time.time()
             translated_text = await translate_text(anthropic_client, translation_context, 'right')
+            translation_time_ms = int((time.time() - translation_start) * 1000)
+            
+            # Track translation result
+            analytics.set_translation_result(translated_text, translation_time_ms, 'right')
             
             # Safety check disabled for Lurkmore-style translations - we want unfiltered content
             logger.info("Safety check disabled - posting Lurkmore-style translation")
@@ -217,10 +264,23 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
             await send_message_parts(dst_channel_to_use, right_content, image_data, image_url_str)
             logger.info(f"Posted right-bidlo version")
             # Persist pair in translation memory (best-effort)
+            save_start_time = time.time()
             try:
-                store_tm(src=txt, tgt=translated_text, pair_id=f"{message_id}-right" if message_id else str(uuid.uuid4()))
+                pair_id = f"{message_id}-right" if message_id else str(uuid.uuid4())
+                logger.info(f"💾 Saving translation pair to memory: {pair_id}")
+                logger.debug(f"📝 Source length: {len(txt)} chars, Translation length: {len(translated_text)} chars")
+                
+                store_tm(src=txt, tgt=translated_text, pair_id=pair_id)
+                save_time = time.time() - save_start_time
+                logger.info(f"✅ Translation pair saved successfully in {save_time:.3f}s: {pair_id}")
+                
+                # Track save time in analytics
+                analytics.set_memory_save_time(int(save_time * 1000))
+                
             except Exception as e:
-                logger.warning(f"TM save failed: {e}")
+                save_time = time.time() - save_start_time
+                logger.error(f"💥 TM save failed for {pair_id} after {save_time:.3f}s: {e}", exc_info=True)
+                analytics.set_error(f"Memory save failed: {e}")
         
         if translation_style == 'left' or translation_style == 'both':
             logger.info("Translating in LEFT-ZOOMER style...")
@@ -233,9 +293,18 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
             logger.info(f"Posted left-zoomer version")
         
         logger.info(f"Total processing time for message: {time.time() - start_time:.2f} seconds")
+        
+        # End analytics session
+        analytics.end_session()
+        
         return True
     except Exception as e:
         logger.error(f"Error processing message: {str(e)}", exc_info=True)
+        
+        # Mark session as failed and end it
+        analytics.set_error(str(e))
+        analytics.end_session()
+        
         return False
 
 async def setup_event_handlers(client_instance):
@@ -804,8 +873,10 @@ async def main():
                 await asyncio.sleep(2)  # Add delay between processing
             
             logger.info("Finished processing recent messages")
+            logger.info("🏁 Exiting after processing recent messages (not starting polling mode)")
+            return  # Exit after processing recent messages, don't start polling
         
-        # Run the client in mega-channel short-poll mode
+        # Run the client in mega-channel short-poll mode (only if not processing recent)
         logger.info(f"Client ready, polling channel: {SRC_CHANNEL}")
         await poll_big_channel(client, SRC_CHANNEL)
         
