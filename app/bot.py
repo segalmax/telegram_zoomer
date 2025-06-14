@@ -52,9 +52,6 @@ API_ID = os.getenv('API_ID')
 API_HASH = os.getenv('API_HASH')
 PHONE = os.getenv('PHONE') or os.getenv('TG_PHONE')  # Check both variable names
 
-# Check if running on Heroku
-IS_HEROKU = os.getenv('DYNO') is not None
-
 SRC_CHANNEL = os.getenv('SRC_CHANNEL')
 DST_CHANNEL = os.getenv('DST_CHANNEL')
 TRANSLATION_STYLE = os.getenv('TRANSLATION_STYLE', 'right')  # right only by default
@@ -75,14 +72,6 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger('app.bot')
-
-# Use different session paths for Heroku vs local development
-if IS_HEROKU:
-    SESSION_PATH = os.getenv('TG_SESSION', 'session/heroku_bot_session')
-    logger.info(f"Running on Heroku, using session path: {SESSION_PATH}")
-else:
-    SESSION_PATH = os.getenv('TG_SESSION', 'session/local_bot_session')
-    logger.info(f"Running locally, using session path: {SESSION_PATH}")
 
 # Check for TEST_SRC_CHANNEL and TEST_DST_CHANNEL environment variables
 # This helps us switch to test mode when running tests

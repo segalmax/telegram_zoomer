@@ -68,14 +68,13 @@ The bot is configured through environment variables set in `.env` and `app_setti
 | STABILITY_AI_API_KEY  | Stability AI API key (if used)              | No       | -             | `.env`        |
 | SRC_CHANNEL           | Source channel to monitor                   | Yes      | -             | `app_settings.env` |
 | DST_CHANNEL           | Destination channel to post translations    | Yes      | -             | `app_settings.env` |
-| TG_SESSION            | Session name for local runs (e.g., `session/my_bot`) | No       | `session/default_persistent_bot_session` | `app_settings.env` |
 | GENERATE_IMAGES       | Whether to generate images for posts        | No       | true          | `app_settings.env` |
 | TRANSLATION_STYLE     | Translation style ('left', 'right', 'both') | No       | both          | `app_settings.env` |
 | HEROKU_APP_NAME       | Name of your Heroku app                     | No*      | -             | `app_settings.env` |
 | TG_COMPRESSED_SESSION_STRING | Compressed Base64 encoded Telethon session (Heroku) | No*      | -             | (set by `setup_heroku.sh`) |
 | LAST_PROCESSED_STATE  | Base64 encoded application state (Heroku)   | No*      | -             | (set by `setup_heroku.sh`) |
 
-*`TG_COMPRESSED_SESSION_STRING` and `LAST_PROCESSED_STATE` are primarily for Heroku, automatically handled by `setup_heroku.sh` for initial setup. The bot will log updates needed for `LAST_PROCESSED_STATE` during operation on Heroku.
+*`TG_COMPRESSED_SESSION_STRING` and `LAST_PROCESSED_STATE` are automatically handled by `setup_heroku.sh` for Heroku deployment.
 
 ### Environment Setup
 
@@ -98,7 +97,6 @@ The application uses a dual environment file approach for better security and co
    DST_CHANNEL=destination_channel_username_or_id
    TEST_SRC_CHANNEL=test_source_channel  # For testing
    TEST_DST_CHANNEL=test_destination_channel  # For testing
-   TG_SESSION=session/my_bot_session
    TRANSLATION_STYLE=both  # 'left', 'right', or 'both'
    GENERATE_IMAGES=true  # 'true' or 'false'
    HEROKU_APP_NAME=your-heroku-app-name  # Used by setup_heroku.sh
@@ -174,7 +172,7 @@ On the first run, or if the session file is deleted/invalid, the bot will prompt
 
 After successful authentication, the session file (e.g., `session/new_session.session` if configured, or `new_session.session` in the root) will be created. This file stores your session, so you won't need to log in every time.
 
-If you configured `TG_SESSION=session/new_session`, ensure you move your existing `new_session.session` (if any from previous root runs) into the `session/` directory *before* running the bot, or allow it to create a new one there after authentication.
+The bot automatically uses `session/local_bot_session.session` for local development. No configuration needed.
 
 ## Deployment
 
@@ -200,7 +198,7 @@ The bot is designed to work seamlessly on Heroku:
    - Reads the app name from `app_settings.env`
    - Reads and sets all environment variables from both `.env` and `app_settings.env`
    - Exports and compresses the Telethon session to fit within Heroku's 64KB config var size limit
-   - Sets `TG_COMPRESSED_SESSION_STRING` instead of the older `TG_SESSION_STRING`
+   - Sets `TG_COMPRESSED_SESSION_STRING` for Heroku deployment
    - Removes obsolete environment variables
 
 4. **Deploy to Heroku** using Git:
@@ -214,24 +212,25 @@ The bot is designed to work seamlessly on Heroku:
    heroku ps:scale worker=1 -a your-heroku-app-name
    ```
 
-### Session Compression
+### Session Management
 
-The bot uses gzip compression to reduce the Telethon session size for Heroku:
-- Original session files (~28KB) are compressed to ~1KB
-- `TG_COMPRESSED_SESSION_STRING` contains the gzip-compressed, Base64-encoded session
-- The `app.session_manager` module automatically handles decompression during startup
-- If `TG_COMPRESSED_SESSION_STRING` is not found, the system falls back to the older `TG_SESSION_STRING` format
+The bot uses simple interactive sessions:
+- **Local development**: `session/local_bot_session.session` (created interactively)
+- **Heroku production**: `session/heroku_bot_session.session` (created interactively on Heroku)
+- **Testing**: `session/sender_test_session.session` (created interactively)
+- No session transfers or compression - each environment creates its own session
 
 ### Heroku Configuration Updates
 
-If you need to update the Heroku environment variables manually:
+**NEVER manually set Heroku config vars with `heroku config:set`!**
+**ALWAYS use the dedicated setup script: `./setup_heroku.sh`**
 
-1. **Session data**: Run `python export_session.py` to get the latest compressed session string
-2. **Application settings**: Any changes to `app_settings.env` should be re-deployed using `bash setup_heroku.sh`
-3. **State persistence**: When the bot logs a new `LAST_PROCESSED_STATE` value, update it in Heroku:
-   ```
-   heroku config:set LAST_PROCESSED_STATE="new_value" -a your-heroku-app-name
-   ```
+The setup_heroku.sh script:
+- Automatically reads from both .env (secrets) and app_settings.env (settings)
+- Deploys ALL environment variables to Heroku in one command
+- Cleans up obsolete variables
+- Is the ONLY way to update Heroku environment variables
+- Sessions are created interactively on first Heroku run
 
 ## Polling Mechanism
 

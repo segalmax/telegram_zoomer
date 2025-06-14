@@ -190,77 +190,43 @@ Your TM lives in Supabase, learns automatically, and is 100 % covered by tests �
 • Bot translates NYT → zoomer Russian with optional cartoons.  
 • Everything must pass tests; keep it simple and production-first.
 
-## 10. Session Management Best Practices (updated 2025-06-14)
+## 10. Session Management - Simplified Interactive Approach (updated 2025-01-14)
 
-We now split Telegram sessions by **role** to prevent `AuthKeyDuplicatedError` and to keep
-local, CI, and Heroku environments isolated.
+**Philosophy**: No session transfers, no compression, no environment variables. Just clean interactive sessions.
 
-1. **Bot session (production & local runs)**
-   • Env vars: `TG_COMPRESSED_SESSION_STRING` **or** `TG_SESSION_STRING`  
-   • Fallback path: `session/local_bot_session` (local) or `session/heroku_bot_session` (Heroku)
+### Session Strategy
+1. **Local Development**
+   • Uses `session/local_bot_session.session`
+   • Created interactively on first run (prompts for phone/code)
 
-2. **Sender / Polling-test session**
-   • Env vars: `TG_SENDER_COMPRESSED_SESSION_STRING` **or** `TG_SENDER_SESSION_STRING`  
-   • Fallback path: `session/sender_test_session` (only used if no string provided and you're running tests interactively).
+2. **Heroku Production** 
+   • Uses `session/heroku_bot_session.session`
+   • Created interactively on first Heroku run (prompts for phone/code)
+   • No session transfers from local to Heroku
 
-   Store a **StringSession** from a *separate Telegram account* in one of the sender
-   env vars so tests can run head-less (no SMS prompt) and never collide with the
-   production bot.
+3. **Testing**
+   • Uses `session/sender_test_session.session`
+   • Created interactively on first test run (prompts for phone/code)
+   • Separate test account recommended to avoid conflicts
 
-3. **How it works**
-
-   `app/session_manager.py` still handles the bot session.  
-   `tests/test_polling.py` now looks for the sender env vars first and uses an
-   in-memory `StringSession`, eliminating `.session` file conflicts.
-
-4. **Regenerating a sender StringSession**
-
+### Deployment Process
 ```bash
-python - <<'PY'
-from telethon.sync import TelegramClient
-from telethon.sessions import StringSession
-import os, base64, gzip
-api_id = int(os.environ['TG_API_ID'])
-api_hash = os.environ['TG_API_HASH']
-with TelegramClient(StringSession(), api_id, api_hash) as client:
-    print('Your new StringSession:', client.session.save())
-PY
+# Deploy to Heroku (no session handling)
+./setup_heroku.sh
+
+# First run on Heroku will prompt for authentication
+heroku logs --tail --app your-app-name
 ```
 
-• For **CI / Heroku**, compress and base-64 encode the string session:
+### Benefits
+- **No session corruption** from transfers/compression
+- **Clean separation** between environments  
+- **Interactive authentication** ensures sessions work properly
+- **No complex environment variables** for session management
+- **Easier debugging** - sessions are just local files
 
-```bash
-echo -n "<string_session_here>" | gzip | base64 -w0
-```
-
-Put the result in `TG_SENDER_COMPRESSED_SESSION_STRING`.
-
-5. **Heroku deployment**
-
-`setup_heroku.sh` already picks up every `*_SESSION_STRING` variable and pushes it
-along with the rest of the `.env` and `app_settings.env` values.
-
-> Remember: **Never** use `heroku config:set` directly – always run `./setup_heroku.sh`.
-
-### 11. Analytics schema update (2025-06-14)
-
-We added two new metrics to the `memory_usage_analytics` table:
-
-| column | type | description |
-|--------|------|-------------|
-| `recency_score` | double precision | 1.0 for brand-new pairs, decays with age (half-life ≈ 24 h) |
-| `combined_score` | double precision | weighted blend of `similarity_score` and `recency_score` (see below) |
-
-Migration applied via Supabase MCP:
-```sql
-alter table public.memory_usage_analytics
-  add column if not exists recency_score  double precision,
-  add column if not exists combined_score double precision;
-```
-
-#### Recency-aware recall ranking
-`app/vector_store.recall` now fetches 4× k candidates and re-ranks them by:
-```
-combined = (1-w)*similarity + w*recency_score
-```
-where `w = $TM_RECENCY_WEIGHT` (default 0.3). Set this env var to fine-tune the bias toward fresh news.
+### Session Files
+- `session/local_bot_session.session` - Local development
+- `session/heroku_bot_session.session` - Heroku production (if exists locally)
+- `session/sender_test_session.session` - Testing
+- `session/app_state.json` - Application state (local only)

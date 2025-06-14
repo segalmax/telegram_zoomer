@@ -48,45 +48,14 @@ TG_PHONE = os.getenv('TG_PHONE')
 TEST_SRC_CHANNEL = os.getenv('TEST_SRC_CHANNEL')
 
 # Session handling ---------------------------------------------------
-# We want polling tests to be fully automated (no interactive code entry)
-# and isolated from the main bot session that may be running elsewhere.
-# The best practice is:
-# 1. Use a **dedicated Telegram account** for tests (recommended) OR
-# 2. Store that account's StringSession in an env var so the test can
-#    authenticate non-interactively.
+# Tests use a dedicated file-based session to avoid conflicts with main bot
+# This will prompt for auth code on first run - that's fine for interactive testing
 
-# Environment variables checked (highest precedence first):
-#   TG_SENDER_COMPRESSED_SESSION_STRING  – base64-gzipped StringSession
-#   TG_SENDER_SESSION_STRING             – plain base64 StringSession
-#   TG_SESSION                           – fallback path for file-based session
-#
-# If no session string is provided, we fall back to a file session inside
-# the `session/` folder. This may prompt for an auth code the first time,
-# so automated CI environments should always set one of the two vars above.
+import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).parent.parent))
 
-from telethon.sessions import StringSession
-
-# Try dedicated sender session strings first
-_compressed_sender_session_b64 = os.getenv("TG_SENDER_COMPRESSED_SESSION_STRING")
-_plain_sender_session_b64 = os.getenv("TG_SENDER_SESSION_STRING")
-
-if _compressed_sender_session_b64 or _plain_sender_session_b64:
-    # We'll use an in-memory StringSession to avoid generating .session files
-    import base64, gzip
-    try:
-        if _compressed_sender_session_b64:
-            _decoded = base64.b64decode(_compressed_sender_session_b64)
-            _session_str = gzip.decompress(_decoded).decode()
-        else:
-            _session_str = base64.b64decode(_plain_sender_session_b64).decode()
-        SENDER_SESSION = StringSession(_session_str)
-        logger.info("Using StringSession from environment for sender test account")
-    except Exception as e:
-        logger.error(f"Failed to decode sender StringSession from env vars: {e}")
-        # Fallback to file-based session below
-        SENDER_SESSION = "session/sender_test_session"  # path without .session
-else:
-    SENDER_SESSION = "session/sender_test_session"  # path without .session
+from app.session_manager import load_app_state, save_app_state
 
 # Unique prefix for each run (stay below 20 chars to keep test messages short)
 MESSAGE_PREFIX = f"POLLING-TEST-{uuid.uuid4().hex[:6]}"
@@ -102,17 +71,14 @@ async def send_test_message():
         logger.error("Missing required environment variables. Check your .env file.")
         return False
     
-    logger.info(f"Using sender session: {SENDER_SESSION}")
+    # Get test session
+    test_session_path = get_test_session()
     
-    # If we're using a file path, ensure directory exists
-    if isinstance(SENDER_SESSION, str):
-        Path(os.path.dirname(SENDER_SESSION)).mkdir(parents=True, exist_ok=True)
-
     # Create and start client
     client = None
     try:
         client = TelegramClient(
-            SENDER_SESSION,
+            test_session_path,
             int(API_ID),
             API_HASH,
             connection=ConnectionTcpAbridged
@@ -149,10 +115,24 @@ async def send_test_message():
             await client.disconnect()
             logger.info("Disconnected from Telegram")
 
+def get_test_session():
+    """
+    Get session for polling tests.
+    Uses the existing persistent test session to avoid creating multiple sessions.
+    """
+    test_session_path = "session/test_session_persistent"
+    
+    # Ensure session directory exists
+    session_dir = Path(test_session_path).parent
+    session_dir.mkdir(parents=True, exist_ok=True)
+    
+    logger.info(f"Using test session: {test_session_path}.session")
+    return test_session_path
+
 if __name__ == "__main__":
     # Run the send_test_message function
     if asyncio.run(send_test_message()):
-        logger.info(f"✅ Test message ({MESSAGE_PREFIX}) sent successfully using {SENDER_SESSION}")
+        logger.info(f"✅ Test message ({MESSAGE_PREFIX}) sent successfully using {get_test_session()}")
         logger.info("Now watch your bot's log output to see if it detects and processes this message")
         # Pass the unique message prefix to stdout for the calling script to capture
         print(f"MESSAGE_PREFIX_SENT:{MESSAGE_PREFIX}")
