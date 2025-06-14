@@ -72,13 +72,13 @@ async def send_test_message():
         return False
     
     # Get test session
-    test_session_path = get_test_session()
+    test_session = get_test_session()
     
     # Create and start client
     client = None
     try:
         client = TelegramClient(
-            test_session_path,
+            test_session,
             int(API_ID),
             API_HASH,
             connection=ConnectionTcpAbridged
@@ -92,6 +92,10 @@ async def send_test_message():
             logger.error("Authorization failed for sender session. Please run manually to authorize.")
             return False
         logger.info("Sender session authorized.")
+        
+        # Save session to database after successful authentication
+        from app.session_manager import save_session_after_auth
+        save_session_after_auth(client, "test_session", "test")
         
         logger.info(f"Sending test message to {TEST_SRC_CHANNEL} with prefix {MESSAGE_PREFIX}...")
         
@@ -118,21 +122,20 @@ async def send_test_message():
 def get_test_session():
     """
     Get session for polling tests.
-    Uses the existing persistent test session to avoid creating multiple sessions.
+    Uses database-backed session with test environment.
     """
-    test_session_path = "session/test_session_persistent"
+    # Set test mode to use test session from database
+    os.environ['TEST_MODE'] = 'true'
     
-    # Ensure session directory exists
-    session_dir = Path(test_session_path).parent
-    session_dir.mkdir(parents=True, exist_ok=True)
-    
-    logger.info(f"Using test session: {test_session_path}.session")
-    return test_session_path
+    from app.session_manager import setup_session
+    session = setup_session()
+    logger.info("Using test session from database")
+    return session
 
 if __name__ == "__main__":
     # Run the send_test_message function
     if asyncio.run(send_test_message()):
-        logger.info(f"✅ Test message ({MESSAGE_PREFIX}) sent successfully using {get_test_session()}")
+        logger.info(f"✅ Test message ({MESSAGE_PREFIX}) sent successfully using database session")
         logger.info("Now watch your bot's log output to see if it detects and processes this message")
         # Pass the unique message prefix to stdout for the calling script to capture
         print(f"MESSAGE_PREFIX_SENT:{MESSAGE_PREFIX}")

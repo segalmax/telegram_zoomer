@@ -19,7 +19,7 @@ import anthropic
 from dotenv import load_dotenv
 from .translator import get_anthropic_client, translate_text, safety_check_translation
 from .image_generator import generate_image_for_post
-from .session_manager import setup_session, load_app_state, save_app_state
+from .session_manager import setup_session, load_app_state, save_app_state, save_session_after_auth
 from telethon.tl.functions.account import UpdateStatusRequest
 from telethon.tl.functions.updates import GetChannelDifferenceRequest
 from telethon.tl.types import InputChannel, ChannelMessagesFilterEmpty
@@ -835,6 +835,9 @@ async def main():
         # Connect to Telegram
         logger.info("Starting Telegram client...")
         await client.start(phone=TG_PHONE)
+        
+        # Save session to database after successful authentication
+        save_session_after_auth(client)
         
         # Process recent messages if requested
         if args.process_recent and args.process_recent > 0:

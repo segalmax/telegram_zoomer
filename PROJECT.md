@@ -190,43 +190,61 @@ Your TM lives in Supabase, learns automatically, and is 100 % covered by tests �
 • Bot translates NYT → zoomer Russian with optional cartoons.  
 • Everything must pass tests; keep it simple and production-first.
 
-## 10. Session Management - Simplified Interactive Approach (updated 2025-01-14)
+## 10. Session Management - Database Storage (updated 2025-01-14)
 
-**Philosophy**: No session transfers, no compression, no environment variables. Just clean interactive sessions.
+**Philosophy**: All sessions stored in Supabase database for persistence across Heroku deployments.
+
+### Database-Backed Sessions
+All Telegram sessions are stored in the `telegram_sessions` table in Supabase:
+
+```sql
+CREATE TABLE telegram_sessions (
+    id SERIAL PRIMARY KEY,
+    session_name VARCHAR(100) UNIQUE NOT NULL,
+    session_data TEXT NOT NULL,  -- Compressed session string
+    environment VARCHAR(50) NOT NULL DEFAULT 'production',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+```
 
 ### Session Strategy
 1. **Local Development**
-   • Uses `session/local_bot_session.session`
-   • Created interactively on first run (prompts for phone/code)
+   • Session name: `local_bot_session` with `local` environment tag
+   • Created interactively on first run, saved to database
 
 2. **Heroku Production** 
-   • Uses `session/heroku_bot_session.session`
-   • Created interactively on first Heroku run (prompts for phone/code)
-   • No session transfers from local to Heroku
+   • Session name: `heroku_bot_session` with `production` environment tag
+   • Created interactively on first run, saved to database
+   • Persists across dyno restarts and deployments
 
 3. **Testing**
-   • Uses `session/sender_test_session.session`
-   • Created interactively on first test run (prompts for phone/code)
-   • Separate test account recommended to avoid conflicts
+   • Session name: `test_session` with `test` environment tag
+   • Created interactively on first test run, saved to database
+   • Separate from production sessions
+
+### How It Works
+1. **Session Creation**: Bot starts with empty StringSession, prompts for auth
+2. **Session Saving**: After successful authentication, `save_session_after_auth()` compresses and stores session in database
+3. **Session Loading**: On subsequent starts, bot loads compressed session from database
+4. **Environment Detection**: Automatically detects local/Heroku/test environment
 
 ### Deployment Process
 ```bash
-# Deploy to Heroku (no session handling)
+# Deploy environment variables (including Supabase credentials)
 ./setup_heroku.sh
 
-# First run on Heroku will prompt for authentication
+# First run on Heroku will prompt for authentication and save to database
 heroku logs --tail --app your-app-name
 ```
 
 ### Benefits
-- **No session corruption** from transfers/compression
-- **Clean separation** between environments  
-- **Interactive authentication** ensures sessions work properly
-- **No complex environment variables** for session management
-- **Easier debugging** - sessions are just local files
+- **Persistent across deployments** - sessions survive Heroku dyno restarts
+- **Clean separation** between environments using database tags
+- **No file management** - everything in database
+- **Automatic compression** - sessions stored efficiently
+- **Fallback support** - gracefully handles missing Supabase credentials
 
-### Session Files
-- `session/local_bot_session.session` - Local development
-- `session/heroku_bot_session.session` - Heroku production (if exists locally)
-- `session/sender_test_session.session` - Testing
-- `session/app_state.json` - Application state (local only)
+### Required Environment Variables
+- `SUPABASE_URL` - Supabase project URL
+- `SUPABASE_KEY` - Supabase service role key (for database access)

@@ -214,14 +214,11 @@ async def test_telegram_pipeline(test_args):
     if not all([API_ID, API_HASH, TG_PHONE, TEST_SRC_CHANNEL, TEST_DST_CHANNEL]):
         pytest.fail("Missing Telegram credentials or test channels. Check .env and ensure TEST_SRC_CHANNEL/TEST_DST_CHANNEL are set.")
 
-    session_dir = Path("session")
-    session_dir.mkdir(exist_ok=True)
-    test_session_base = PERSISTENT_TEST_SESSION
-    if test_args.new_session:
-        test_session_base = f"session/test_session_{uuid.uuid4().hex[:8]}"
-        logger.info(f"Creating new temporary test session: {test_session_base}")
-    else:
-        logger.info(f"Using persistent test session: {test_session_base}")
+    # Use database-backed session for tests
+    os.environ['TEST_MODE'] = 'true'
+    from app.session_manager import setup_session
+    test_session = setup_session()
+    logger.info("Using database-backed test session")
 
     client = None
     original_use_stability_env = os.environ.get('USE_STABILITY_AI')
@@ -238,14 +235,18 @@ async def test_telegram_pipeline(test_args):
         logger.info(f"Telegram test: Stability AI {stability_status}, Images {images_status}")
 
         client = TelegramClient(
-            test_session_base, int(API_ID), API_HASH,
+            test_session, int(API_ID), API_HASH,
             connection=ConnectionTcpAbridged,
             device_model="Pytest Test Device",
             system_version="Pytest Test OS",
             app_version="Zoomer Bot Pytest 1.0"
         )
-        logger.info(f"Starting Telegram client for session: {test_session_base}...")
+        logger.info("Starting Telegram client with database session...")
         await client.start(phone=TG_PHONE)
+        
+        # Save session to database after successful authentication
+        from app.session_manager import save_session_after_auth
+        save_session_after_auth(client, "test_session", "test")
         assert await client.is_user_authorized(), "Telegram client not authorized."
         logger.info("Successfully connected and authenticated to Telegram")
 
