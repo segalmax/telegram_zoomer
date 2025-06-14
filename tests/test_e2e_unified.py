@@ -330,16 +330,8 @@ async def test_telegram_pipeline(test_args):
         if client and client.is_connected():
             await client.disconnect()
             logger.info("Disconnected from Telegram")
-        if test_args.new_session and test_session_base != PERSISTENT_TEST_SESSION:
-            for suffix in [".session", ".session-journal"]:
-                try:
-                    session_file = Path(f"{test_session_base}{suffix}")
-                    if session_file.exists(): session_file.unlink()
-                    logger.info(f"Removed temporary session file: {session_file}")
-                except Exception as e_clean:
-                    logger.warning(f"Failed to remove temporary session file {session_file}: {str(e_clean)}")
-        else:
-            logger.info(f"Keeping persistent session file: {test_session_base}.session")
+        # Database sessions don't need file cleanup
+        logger.info("Using database-backed session - no file cleanup needed")
         
         # Restore original env vars
         if original_use_stability_env is not None: os.environ['USE_STABILITY_AI'] = original_use_stability_env
