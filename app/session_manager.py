@@ -62,12 +62,12 @@ class DatabaseSession:
                 'updated_at': datetime.now().isoformat()
             }
             
-            # Upsert session
+            # Upsert session using PUT with Prefer header for upsert
+            headers['Prefer'] = 'resolution=merge-duplicates'
             response = httpx.post(
                 f"{self.supabase_url}/rest/v1/telegram_sessions",
                 headers=headers,
-                json=data,
-                params={'on_conflict': 'session_name'}
+                json=data
             )
             
             if response.status_code in [200, 201]:
@@ -232,8 +232,16 @@ def save_session_after_auth(client, session_name=None, environment=None):
             environment = "local"
     
     try:
-        session_string = client.session.save()
+        # Check if session already exists
         db_session = DatabaseSession(session_name, environment)
+        existing_session = db_session.load_session()
+        
+        if existing_session:
+            logger.info(f"Session {session_name} already exists in database, skipping save")
+            return
+        
+        # Save new session
+        session_string = client.session.save()
         success = db_session.save_session(session_string)
         
         if success:

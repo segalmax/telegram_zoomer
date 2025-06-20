@@ -98,16 +98,18 @@ EMBED_MODEL                           # optional, default text-embedding-ada-002
 
 ## 7. Task Snapshot (abridged)
 ### ✅ Done (MVP)
-- Core bot pipeline
+- Core bot pipeline with article extraction
 - Translation & image modules
-- Session compression, env split
+- **Translation Memory** (Supabase + pgvector)
+- **Database-backed sessions** (Supabase)
+- **Analytics system** with comprehensive tracking
 - Robust pytest suite
 
 ### 🔄 In Progress / Next
-- **Task 26**: Translation memory (Supabase pgvector) – HIGH PRIORITY
-- **Task 13**: Analytics & feedback
-- **Task 14**: CI + rate limiting
-- **Task 15**: Multi-source news, preferences
+- **Task 19**: Disable image generation temporarily – MEDIUM PRIORITY
+- **Task 13**: Future enhancements framework (image improvements)
+- **Task 14**: User documentation 
+- **Task 15**: Final QA before production
 
 (See `tasks/` or Task-Master AI for full tree.)
 
@@ -150,13 +152,15 @@ CREATE FUNCTION match_article_chunks(...);               -- idem
 * `SUPABASE_URL`, `SUPABASE_KEY` – point to the Postgres instance.
 * `EMBED_MODEL` – override embedding model (must be 1536-d or adapt table).
 
-### Analytics & Data Science (NEW)
+### Analytics & Data Science ✅ COMPLETED
 **Enhanced debugging & metrics collection:**
 - **k=10** memories retrieved (increased from 5)
 - **Comprehensive logging** with emojis for easy parsing
 - **Analytics tables**: `translation_sessions`, `memory_usage_analytics`, `performance_metrics`, `quality_metrics`
 - **Real-time tracking**: processing times, memory effectiveness, similarity scores
 - **Dashboard**: `python scripts/analytics_dashboard.py --detailed --export`
+- **Session tracking**: Success/failure rates, processing times, memory effectiveness
+- **Data export**: JSON export for data science analysis with `--export` flag
 
 ### Local testing
 Run `pytest tests/test_vector_store.py -v` – saves + recalls a pair against the live db.
