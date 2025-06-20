@@ -105,6 +105,15 @@ EMBED_MODEL                           # optional, default text-embedding-ada-002
 - **Analytics system** with comprehensive tracking
 - Robust pytest suite
 
+### ✅ Done (Recent)
+- **Translation Prompt Optimization (2025-01-20)**: Major improvements to RIGHT style prompt:
+  - **Eliminated formulaic patterns**: No more "Ну что, товарищи...", "Классическая..." repetition
+  - **Flow awareness**: Now aware it's part of chronological news feed
+  - **Context adaptation**: Different tones for breaking news, politics, human drama, tech/science
+  - **Repetition avoidance**: Actively avoids patterns from translation memory examples
+  - **Authentic voice**: Focus on understanding motives/consequences rather than forced cynicism
+  - **Length optimization**: Maximum 200 words per post (down from 400+ word posts)
+
 ### 🔄 In Progress / Next
 - **Task 19**: Disable image generation temporarily – MEDIUM PRIORITY
 - **Task 13**: Future enhancements framework (image improvements)
