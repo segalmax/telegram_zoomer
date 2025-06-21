@@ -34,7 +34,7 @@
 • Generates editorial cartoon images with DALL-E or Stability AI (`GENERATE_IMAGES`, `USE_STABILITY_AI`).  
 • Posts formatted markdown with hidden hyperlinks to `DST_CHANNEL`.  
 • Robust error handling—tests fail on any logged `ERROR`.  
-• Persistent Telethon session compressed into env var for Heroku (≤64 KB).  
+• **Stateless**: Telethon session & app state stored in Supabase – zero local files, survives dyno restarts.  
 • CLI `--process-recent N`, `--no-images`, `--stability`, `--new-session`.
 
 ---
@@ -46,7 +46,7 @@ app/               core modules
   translator.py    – OpenAI translation helper
   image_generator.py – DALLE / Stability helper
   article_extractor.py – newspaper4k wrapper
-  session_manager.py – env/local session handling
+  session_manager.py – database session handling
 scripts/           one-off utilities (auth, export_session)
 session/           local *.session + app_state.json
 tests/             pytest suite + shell polling test
@@ -91,7 +91,7 @@ EMBED_MODEL                           # optional, default text-embedding-ada-002
 ## 6. Deployment Notes (Heroku)
 1. `runtime.txt` → Python 3.10.12 (to migrate to `.python-version`).  
 2. Worker specified in `Procfile`: `python app/bot.py`.  
-3. Session & app state live in config vars, recreated at startup.  
+3. Session & app state live in **Supabase**; slug remains read-only & stateless.  
 4. Logs: `heroku logs --tail --app <app>`.
 
 ---
