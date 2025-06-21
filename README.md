@@ -51,9 +51,11 @@ Monitor logs for:
 
 ### Prerequisites
 
-- Python 3.8+
-- Telegram API credentials (API ID and Hash) from [my.telegram.org](https://my.telegram.org/)
-- OpenAI API key from [OpenAI dashboard](https://platform.openai.com/account/api-keys)
+- Python 3.9+
+- OpenAI API key
+- Telegram API credentials
+- **Supabase database** (for persistent session and PTS storage)
+- Heroku account (for deployment)
 
 ## Configuration
 
@@ -85,7 +87,7 @@ The application uses a dual environment file approach for better security and co
    # .env - SENSITIVE CREDENTIALS (gitignored)
    TG_API_ID=your_telegram_api_id
    TG_API_HASH=your_telegram_api_hash
-   TG_PHONE=your_phone_number_for_initial_auth
+   TG_PHONE=your_phone_number
    OPENAI_API_KEY=your_openai_api_key
    STABILITY_AI_API_KEY=your_stability_ai_key  # Optional
    ```
@@ -340,3 +342,37 @@ This ensures both environments have separate, valid sessions.
 
 - Check logs:
   ```
+
+## Environment Variables
+
+### Required for all environments:
+```bash
+# Telegram API
+TG_API_ID=your_telegram_api_id
+TG_API_HASH=your_telegram_api_hash  
+TG_PHONE=your_phone_number
+TG_COMPRESSED_SESSION_STRING=your_compressed_session_string
+
+# Supabase (CRITICAL for PTS persistence)
+SUPABASE_URL=your_supabase_project_url
+SUPABASE_KEY=your_supabase_anon_key
+
+# OpenAI
+OPENAI_API_KEY=your_openai_api_key
+```
+
+### Database Setup
+
+**⚠️ IMPORTANT: You must set up the Supabase database before running the bot!**
+
+1. **Create the required tables in your Supabase SQL editor:**
+   ```sql
+   -- Copy and run the contents of supabase_app_state_table.sql
+   ```
+
+2. **Test the setup:**
+   ```bash
+   python scripts/setup_supabase_pts.py
+   ```
+
+This fixes the `PersistentTimestampEmptyError` that occurs due to Heroku's ephemeral filesystem.

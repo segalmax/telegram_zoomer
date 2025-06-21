@@ -212,7 +212,7 @@ Your TM lives in Supabase, learns automatically, and is 100 % covered by tests �
 
 **Key Changes:**
 - ✅ Created `telegram_sessions` table with RLS policies
-- ✅ Rewrote `app/session_manager.py` with `DatabaseSession` class
+- ✅ Rewritten `app/session_manager.py` with `DatabaseSession` class
 - ✅ Updated all bot components to use database sessions
 - ✅ Environment-specific sessions (local/production/test)
 - ✅ Automatic session saving after authentication
@@ -281,3 +281,46 @@ heroku logs --tail --app nyt-zoomer-bot
 ### Required Environment Variables ✅
 - `SUPABASE_URL` - Supabase project URL
 - `SUPABASE_KEY` - Supabase service role key (for database access)
+
+### Database Setup (IMPORTANT)
+
+The bot now uses **Supabase for persistent PTS storage** to solve Heroku ephemeral filesystem issues.
+
+1. **Create the app_state table in Supabase:**
+   ```sql
+   -- Run this SQL in your Supabase SQL editor
+   -- (Contents of supabase_app_state_table.sql)
+   ```
+
+2. **Test the setup:**
+   ```bash
+   python scripts/setup_supabase_pts.py
+   ```
+
+3. **Required environment variables:**
+   - `SUPABASE_URL` - Your Supabase project URL
+   - `SUPABASE_KEY` - Your Supabase anon/service key
+
+### PTS (Persistent Timestamp) System
+
+**What is PTS?**
+- PTS is Telegram's state synchronization mechanism
+- It tracks the last processed update for channels
+- **Critical**: Must persist across restarts or you get `PersistentTimestampEmptyError`
+
+**Previous Issue:**
+- PTS was stored in local files (`session/app_state.json`)
+- Heroku's ephemeral filesystem wiped these files on every restart
+- Bot always started with `pts=0`, causing persistent errors
+
+**Current Solution:**
+- PTS stored in Supabase `app_state` table
+- Separate records for `production`, `local`, and `test` environments
+- Automatic PTS reset/recovery on `PersistentTimestampEmptyError`
+- Local file backup for redundancy
+
+### Runtime Modes
+
+The bot now runs **event-handler–only** by default (Telethon `events.NewMessage`).
+
+Manual polling code has been removed; the bot now relies solely on Telethon's `events.NewMessage` push mechanism for real-time updates.

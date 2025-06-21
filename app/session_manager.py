@@ -1,12 +1,12 @@
 """
 Database-backed session manager for Telegram client sessions
 
-Stores sessions in Supabase database for persistence across Heroku deployments.
+Stores sessions and app state (including PTS) in Supabase database for persistence across Heroku deployments.
 - Local development: Uses database with 'local' environment tag
 - Heroku production: Uses database with 'production' environment tag  
 - Tests: Uses database with 'test' environment tag
 
-No file-based sessions, no compression, just clean database storage.
+No file-based sessions or state, everything in database for true persistence.
 """
 
 import os
@@ -20,6 +20,7 @@ from telethon.sessions import StringSession
 
 logger = logging.getLogger(__name__)
 
+# Keep local file as fallback only
 APP_STATE_FILE = Path("session/app_state.json")
 APP_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
 
@@ -123,26 +124,29 @@ class DatabaseSession:
             logger.error(f"Error loading session from database: {e}")
             return None
 
+def _get_environment():
+    """Determine current environment for database operations"""
+    is_heroku = os.getenv('DYNO') is not None
+    is_test = os.getenv('TEST_MODE') == 'true'
+    
+    if is_test:
+        return "test"
+    elif is_heroku:
+        return "production"
+    else:
+        return "local"
+
 def load_app_state():
-    """Load the application state from database with file fallback."""
-    # Try database first
+    """Load the application state from Supabase database with local file fallback."""
+    environment = _get_environment()
+    
+    # Try to load from database first
     supabase_url = os.environ.get('SUPABASE_URL')
     supabase_key = os.environ.get('SUPABASE_KEY')
     
     if supabase_url and supabase_key:
         try:
             import httpx
-            
-            # Determine environment
-            is_heroku = os.getenv('DYNO') is not None
-            is_test = os.getenv('TEST_MODE') == 'true'
-            
-            if is_test:
-                environment = "test"
-            elif is_heroku:
-                environment = "production"
-            else:
-                environment = "local"
             
             headers = {
                 'apikey': supabase_key,
@@ -163,15 +167,12 @@ def load_app_state():
                 data = response.json()
                 if data:
                     state_data = data[0]
-                    logger.info(f"Loaded app state from database for environment: {environment}")
-                    
                     # Convert timestamp string to datetime object
                     if isinstance(state_data.get("timestamp"), str):
                         state_data["timestamp"] = datetime.fromisoformat(state_data["timestamp"])
                     
-                    # Ensure PTS is integer
-                    state_data["pts"] = int(state_data.get("pts", 0))
-                    
+                    logger.info(f"Loaded app state from Supabase database (environment: {environment})")
+                    logger.info(f"App state PTS: {state_data.get('pts', 0)}")
                     return state_data
                 else:
                     logger.info(f"No app state found in database for environment: {environment}")
@@ -179,14 +180,14 @@ def load_app_state():
                 logger.warning(f"Failed to load app state from database: {response.status_code}")
                 
         except Exception as e:
-            logger.warning(f"Error loading app state from database, falling back to file: {e}")
+            logger.error(f"Error loading app state from database: {e}")
     
-    # Fallback to local file
+    # Fallback to local file if database fails
     if APP_STATE_FILE.exists():
         try:
             with open(APP_STATE_FILE, 'r') as f:
                 state_data = json.load(f)
-            logger.info(f"Loaded app state from local file: {APP_STATE_FILE}")
+            logger.info(f"Loaded app state from local file fallback: {APP_STATE_FILE}")
             
             # Convert timestamp string to datetime object
             if isinstance(state_data.get("timestamp"), str):
@@ -196,26 +197,30 @@ def load_app_state():
         except Exception as e:
             logger.error(f"Failed to load state from {APP_STATE_FILE}: {e}")
 
-    # Default state
+    # Default state if nothing works
     state_data = {
         "message_id": 0,
         "timestamp": datetime.now() - timedelta(minutes=5),
         "pts": 0,
         "channel_id": None,
-        "updated_at": datetime.now().isoformat()
+        "updated_at": datetime.now().isoformat(),
+        "environment": environment
     }
-    logger.info("Using default app state (looking back 5 minutes)")
+    logger.info(f"Using default app state (looking back 5 minutes) for environment: {environment}")
     return state_data
 
 def save_app_state(state_data):
-    """Save the application state to database with file fallback."""
+    """Save the application state to Supabase database with local file backup."""
     if not isinstance(state_data, dict):
         logger.error("Invalid state_data provided to save_app_state. Must be a dict.")
         return
 
+    environment = _get_environment()
+    
     # Prepare state for saving
     state_to_save = state_data.copy()
     state_to_save["updated_at"] = datetime.now().isoformat()
+    state_to_save["environment"] = environment
     
     # Convert datetime to ISO string for JSON serialization
     if isinstance(state_to_save.get("timestamp"), datetime):
@@ -223,24 +228,15 @@ def save_app_state(state_data):
     
     state_to_save["pts"] = int(state_to_save.get("pts", 0))
 
-    # Try database first
+    # Save to database first
     supabase_url = os.environ.get('SUPABASE_URL')
     supabase_key = os.environ.get('SUPABASE_KEY')
+    
+    database_success = False
     
     if supabase_url and supabase_key:
         try:
             import httpx
-            
-            # Determine environment
-            is_heroku = os.getenv('DYNO') is not None
-            is_test = os.getenv('TEST_MODE') == 'true'
-            
-            if is_test:
-                environment = "test"
-            elif is_heroku:
-                environment = "production"
-            else:
-                environment = "local"
             
             headers = {
                 'apikey': supabase_key,
@@ -249,32 +245,34 @@ def save_app_state(state_data):
                 'Prefer': 'resolution=merge-duplicates'
             }
             
-            # Add environment to state
-            state_to_save["environment"] = environment
-            
-            response = httpx.post(
+            # Use PATCH with environment filter for proper upsert
+            response = httpx.patch(
                 f"{supabase_url}/rest/v1/app_state",
                 headers=headers,
+                params={'environment': f'eq.{environment}'},
                 json=state_to_save
             )
             
-            if response.status_code in [200, 201]:
-                logger.info(f"Saved app state to database for environment: {environment}")
-                return  # Success, no need for file fallback
+            if response.status_code in [200, 201, 204]:
+                logger.info(f"Saved app state to database (environment: {environment}, PTS: {state_to_save['pts']})")
+                database_success = True
             else:
-                logger.warning(f"Failed to save app state to database: {response.status_code} {response.text}")
+                logger.error(f"Failed to save app state to database: {response.status_code} {response.text}")
                 
         except Exception as e:
-            logger.warning(f"Error saving app state to database, falling back to file: {e}")
-
-    # Fallback to local file
+            logger.error(f"Error saving app state to database: {e}")
+    
+    # Always save to local file as backup
     try:
         APP_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
         with open(APP_STATE_FILE, 'w') as f:
             json.dump(state_to_save, f, indent=4)
-        logger.info(f"Saved app state to local file: {APP_STATE_FILE}")
+        logger.info(f"Saved app state to local file backup: {APP_STATE_FILE}")
     except Exception as e:
         logger.error(f"Error saving app state to {APP_STATE_FILE}: {e}")
+    
+    if not database_success:
+        logger.warning("App state was not saved to database - relying on local file backup")
 
 def setup_session():
     """
@@ -351,4 +349,44 @@ def save_session_after_auth(client, session_name=None, environment=None):
             logger.warning(f"Failed to save session {session_name} to database")
             
     except Exception as e:
-        logger.error(f"Error saving session after auth: {e}") 
+        logger.error(f"Error saving session after auth: {e}")
+
+def reset_pts(environment=None):
+    """
+    Reset PTS to 0 for graceful recovery from PersistentTimestampEmptyError.
+    This forces the bot to start fresh with channel polling.
+    
+    Args:
+        environment: Specific environment to reset, or None for current environment
+    """
+    if environment is None:
+        environment = _get_environment()
+    
+    logger.warning(f"Resetting PTS to 0 for environment: {environment}")
+    
+    # Load current state
+    current_state = load_app_state()
+    
+    # Reset PTS and update timestamp
+    current_state['pts'] = 0
+    current_state['message_id'] = 0
+    current_state['timestamp'] = datetime.now() - timedelta(minutes=5)
+    
+    # Save updated state
+    save_app_state(current_state)
+    
+    logger.info(f"PTS reset complete for environment: {environment}")
+
+def get_pts_info():
+    """Get current PTS information for debugging"""
+    environment = _get_environment()
+    state = load_app_state()
+    
+    return {
+        'environment': environment,
+        'pts': state.get('pts', 0),
+        'message_id': state.get('message_id', 0),
+        'timestamp': state.get('timestamp'),
+        'updated_at': state.get('updated_at'),
+        'has_supabase': bool(os.environ.get('SUPABASE_URL') and os.environ.get('SUPABASE_KEY'))
+    } 
