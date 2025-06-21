@@ -14,15 +14,10 @@ import logging
 import json
 import base64
 import gzip
-from pathlib import Path
 from datetime import datetime, timedelta
 from telethon.sessions import StringSession
 
 logger = logging.getLogger(__name__)
-
-# Keep local file as fallback only
-APP_STATE_FILE = Path("session/app_state.json")
-APP_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
 
 class DatabaseSession:
     """Telegram session stored in database"""
@@ -56,6 +51,7 @@ class DatabaseSession:
                 'Content-Type': 'application/json'
             }
             
+            # Prepare payload
             data = {
                 'session_name': self.session_name,
                 'session_data': compressed,
@@ -63,7 +59,7 @@ class DatabaseSession:
                 'updated_at': datetime.now().isoformat()
             }
             
-            # Upsert session using PUT with Prefer header for upsert
+            # Upsert session using POST with Prefer header for upsert
             headers['Prefer'] = 'resolution=merge-duplicates'
             response = httpx.post(
                 f"{self.supabase_url}/rest/v1/telegram_sessions",
@@ -137,7 +133,7 @@ def _get_environment():
         return "local"
 
 def load_app_state():
-    """Load the application state from Supabase database with local file fallback."""
+    """Load the application state from Supabase database (no filesystem fallback)."""
     environment = _get_environment()
     
     # Try to load from database first
@@ -182,22 +178,7 @@ def load_app_state():
         except Exception as e:
             logger.error(f"Error loading app state from database: {e}")
     
-    # Fallback to local file if database fails
-    if APP_STATE_FILE.exists():
-        try:
-            with open(APP_STATE_FILE, 'r') as f:
-                state_data = json.load(f)
-            logger.info(f"Loaded app state from local file fallback: {APP_STATE_FILE}")
-            
-            # Convert timestamp string to datetime object
-            if isinstance(state_data.get("timestamp"), str):
-                state_data["timestamp"] = datetime.fromisoformat(state_data["timestamp"])
-            
-            return state_data
-        except Exception as e:
-            logger.error(f"Failed to load state from {APP_STATE_FILE}: {e}")
-
-    # Default state if nothing works
+    # Default state if database unavailable
     state_data = {
         "message_id": 0,
         "timestamp": datetime.now() - timedelta(minutes=5),
@@ -210,7 +191,7 @@ def load_app_state():
     return state_data
 
 def save_app_state(state_data):
-    """Save the application state to Supabase database with local file backup."""
+    """Save the application state to Supabase database (no filesystem backup)."""
     if not isinstance(state_data, dict):
         logger.error("Invalid state_data provided to save_app_state. Must be a dict.")
         return
@@ -262,17 +243,8 @@ def save_app_state(state_data):
         except Exception as e:
             logger.error(f"Error saving app state to database: {e}")
     
-    # Always save to local file as backup
-    try:
-        APP_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        with open(APP_STATE_FILE, 'w') as f:
-            json.dump(state_to_save, f, indent=4)
-        logger.info(f"Saved app state to local file backup: {APP_STATE_FILE}")
-    except Exception as e:
-        logger.error(f"Error saving app state to {APP_STATE_FILE}: {e}")
-    
     if not database_success:
-        logger.warning("App state was not saved to database - relying on local file backup")
+        logger.error("App state was NOT saved to database – state persistence lost!")
 
 def setup_session():
     """
