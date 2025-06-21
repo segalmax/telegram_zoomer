@@ -29,6 +29,7 @@ from .pts_manager import get_pts, update_pts
 from .vector_store import recall as recall_tm, save_pair as store_tm
 from .article_extractor import extract_article
 from .analytics import analytics
+from .linker import add_navigation_links
 
 # Load environment variables explicitly from project root.
 # Order of loading determines precedence for non-secret variables if keys overlap.
@@ -152,10 +153,12 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
             logger.info(f"Including extracted URL from message: {message_entity_urls[0]}")
         
         async def send_message_parts(channel, text_content, image_file=None, image_url_link=None):
+            """Send message parts and return the sent message object for navigation link tracking."""
+            sent_message = None
             if image_file:
                 # Use up to 1024 characters for caption
                 caption = text_content[:1024]
-                await client_instance.send_file(channel, image_file, caption=caption, parse_mode='md')
+                sent_message = await client_instance.send_file(channel, image_file, caption=caption, parse_mode='md')
                 # If text is too long for caption, send the rest as a separate message
                 if len(text_content) > 1024:
                     remaining_text = text_content[1024:]
@@ -163,9 +166,11 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
                         await client_instance.send_message(channel, remaining_text, parse_mode='md')
             elif image_url_link:
                 full_message = f"{text_content}\\n\\n🖼️ {image_url_link}"
-                await client_instance.send_message(channel, full_message, parse_mode='md')
+                sent_message = await client_instance.send_message(channel, full_message, parse_mode='md')
             else:
-                await client_instance.send_message(channel, text_content, parse_mode='md')
+                sent_message = await client_instance.send_message(channel, text_content, parse_mode='md')
+            
+            return sent_message
 
         # Get translation style from environment (default to 'both')
         translation_style = os.getenv("TRANSLATION_STYLE", "right").lower()
@@ -236,55 +241,87 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
                 translation_context += f"\n\nNote: This message contains a link: {message_entity_urls[0]}"
                 logger.info("Article extraction failed, using fallback link mention")
         
-        if translation_style == 'right' or translation_style == 'both':
-            logger.info("Translating in RIGHT-BIDLO style...")
-            translation_start = time.time()
-            translated_text = await translate_text(anthropic_client, translation_context, 'right')
-            translation_time_ms = int((time.time() - translation_start) * 1000)
-            
-            # Track translation result
-            analytics.set_translation_result(translated_text, translation_time_ms, 'right')
-            
-            # Safety check disabled for Lurkmore-style translations - we want unfiltered content
-            logger.info("Safety check disabled - posting Lurkmore-style translation")
-            right_content = f"{translated_text}{source_footer}"
-            await send_message_parts(dst_channel_to_use, right_content, image_data, image_url_str)
-            logger.info(f"Posted right-bidlo version")
-            # Persist pair in translation memory (best-effort)
-            save_start_time = time.time()
-            try:
-                pair_id = f"{message_id}-right" if message_id else str(uuid.uuid4())
-                logger.info(f"💾 Saving translation pair to memory: {pair_id}")
-                logger.debug(f"📝 Source length: {len(txt)} chars, Translation length: {len(translated_text)} chars")
+        if TEST_MODE and os.getenv('FAST_TEST_TRANSLATION', '1') == '1':
+            # Fast path for unit/integration tests – avoid external API calls
+            logger.info("TEST_MODE fast-translation enabled – skipping Anthropic API call")
+            translated_text = f"[TEST] {txt[:200]}"
+            linked_text = add_navigation_links(translated_text, memory, max_phrases=5)
+            right_content = f"{linked_text}{source_footer}"
+            sent_message = await send_message_parts(dst_channel_to_use, right_content, image_data, image_url_str)
+            # Skip saving to TM in fast test mode to reduce Supabase traffic
+        else:
+            if translation_style == 'right' or translation_style == 'both':
+                logger.info("Translating in RIGHT-BIDLO style...")
+                translation_start = time.time()
+                translated_text = await translate_text(anthropic_client, translation_context, 'right')
+                translation_time_ms = int((time.time() - translation_start) * 1000)
                 
-                store_tm(src=txt, tgt=translated_text, pair_id=pair_id)
-                save_time = time.time() - save_start_time
-                logger.info(f"✅ Translation pair saved successfully in {save_time:.3f}s: {pair_id}")
+                # Track translation result
+                analytics.set_translation_result(translated_text, translation_time_ms, 'right')
                 
-                # Track save time in analytics
-                analytics.set_memory_save_time(int(save_time * 1000))
+                # Inject navigation links to previous messages (best effort)
+                linked_text = add_navigation_links(translated_text, memory, max_phrases=5)
+
+                logger.info("Safety check disabled - posting Lurkmore-style translation with navigation links")
+                right_content = f"{linked_text}{source_footer}"
+                logger.info(f"📝 Final post content preview: {right_content[:200]}...")
+                sent_message = await send_message_parts(dst_channel_to_use, right_content, image_data, image_url_str)
+                logger.info(f"Posted right-bidlo version")
                 
-            except Exception as e:
-                save_time = time.time() - save_start_time
-                logger.error(f"💥 TM save failed for {pair_id} after {save_time:.3f}s: {e}", exc_info=True)
-                analytics.set_error(f"Memory save failed: {e}")
-        
-        if translation_style == 'left' or translation_style == 'both':
-            logger.info("Translating in LEFT-ZOOMER style...")
-            translated_text = await translate_text(anthropic_client, translation_context, 'left')
-            
-            # Safety check disabled for unfiltered translations  
-            logger.info("Safety check disabled - posting LEFT-ZOOMER translation")
-            left_content = f"🔵 LEFT-ZOOMER VERSION:\n\n{translated_text}{source_footer}"
-            await send_message_parts(dst_channel_to_use, left_content, None, None)
-            logger.info(f"Posted left-zoomer version")
+                # Persist pair in translation memory (best-effort) 
+                save_start_time = time.time()
+                try:
+                    pair_id = f"{message_id}-right" if message_id else str(uuid.uuid4())
+                    logger.info(f"💾 Saving translation pair to memory: {pair_id}")
+                    logger.debug(f"📝 Source length: {len(txt)} chars, Translation length: {len(translated_text)} chars")
+                    
+                    # Construct destination message URL from the sent message
+                    destination_message_url = None
+                    if sent_message and hasattr(sent_message, 'id'):
+                        # Remove @ from channel name and construct t.me URL
+                        dest_channel_clean = dst_channel_to_use.replace("@", "")
+                        destination_message_url = f"https://t.me/{dest_channel_clean}/{sent_message.id}"
+                        logger.info(f"🔗 Constructed destination URL: {destination_message_url}")
+                    
+                    store_tm(
+                        src=txt,
+                        tgt=translated_text,
+                        pair_id=pair_id,
+                        message_id=sent_message.id if sent_message else message_id,
+                        channel_name=dst_channel_to_use.replace("@", ""),
+                        message_url=destination_message_url,
+                    )
+                    save_time = time.time() - save_start_time
+                    logger.info(f"✅ Translation pair saved successfully in {save_time:.3f}s: {pair_id}")
+                    
+                    # Track save time in analytics
+                    analytics.set_memory_save_time(int(save_time * 1000))
+                    
+                except Exception as e:
+                    save_time = time.time() - save_start_time
+                    logger.error(f"💥 TM save failed for {pair_id} after {save_time:.3f}s: {e}", exc_info=True)
+                    analytics.set_error(f"Memory save failed: {e}")
+            else:
+                logger.info("Translating in LEFT-ZOOMER style...")
+                translated_text = await translate_text(anthropic_client, translation_context, 'left')
+
+                # Add navigation links for left version as well
+                linked_text_left = add_navigation_links(translated_text, memory, max_phrases=5)
+                
+                # Safety check disabled for unfiltered translations  
+                logger.info("Safety check disabled - posting LEFT-ZOOMER translation with navigation links")
+                left_content = f"🔵 LEFT-ZOOMER VERSION:\n\n{linked_text_left}{source_footer}"
+                sent_message = await send_message_parts(dst_channel_to_use, left_content, None, None)
+                logger.info(f"Posted left-zoomer version")
+                
+                # TODO: Add TM saving for left translations if needed
         
         logger.info(f"Total processing time for message: {time.time() - start_time:.2f} seconds")
         
         # End analytics session
         analytics.end_session()
         
-        return True
+        return sent_message
     except Exception as e:
         logger.error(f"Error processing message: {str(e)}", exc_info=True)
         
@@ -328,8 +365,39 @@ async def setup_event_handlers(client_instance):
             
             logger.info(f"Extracted URLs from message: {message_entity_urls}")
             
-            success = await translate_and_post(client_instance, txt, event.message.id, message_entity_urls=message_entity_urls)
-            if success:
+            sent_message = await translate_and_post(client_instance, txt, event.message.id, message_entity_urls=message_entity_urls)
+            if sent_message:
+                current_state = load_app_state()
+                current_state['message_id'] = event.message.id
+                current_state['timestamp'] = event.message.date.isoformat() # Ensure ISO format
+                # PTS is not directly available here, rely on GetChannelDifference for PTS updates
+                # If this handler is primary, might need a way to estimate or fetch PTS if critical
+                save_app_state(current_state)
+                logger.info(f"App state updated after processing new message ID {event.message.id}")
+        except Exception as e:
+            logger.error(f"Error in handle_new_message: {str(e)}", exc_info=True)
+
+    @client_instance.on(events.NewMessage(chats=SRC_CHANNEL))
+    async def handler(event):
+        try:
+            txt = event.message.text
+            if not txt: return
+            logger.info(f"Received new message: {txt[:50]}...")
+            
+            # Extract URLs from message entities
+            message_entity_urls = []
+            if hasattr(event.message, 'entities') and event.message.entities:
+                for entity in event.message.entities:
+                    if hasattr(entity, 'url') and entity.url:
+                        message_entity_urls.append(entity.url)
+                    elif hasattr(entity, '_') and entity._ in ('MessageEntityUrl', 'MessageEntityTextUrl'):
+                        if hasattr(entity, 'offset') and hasattr(entity, 'length'):
+                            url_text = txt[entity.offset:entity.offset + entity.length]
+                            if url_text.startswith('http'):
+                                message_entity_urls.append(url_text)
+            
+            sent_message = await translate_and_post(client_instance, txt, event.message.id, message_entity_urls=message_entity_urls)
+            if sent_message:
                 current_state = load_app_state()
                 current_state['message_id'] = event.message.id
                 current_state['timestamp'] = event.message.date.isoformat() # Ensure ISO format
@@ -391,11 +459,11 @@ async def process_recent_posts(client_instance, limit=10, timeout=300):
             
             processing_msg_timeout = min(180, (timeout - (time.time() - start_time)) / (len(messages) - processed_count + 1))
             try:
-                success = await asyncio.wait_for(
+                sent_message = await asyncio.wait_for(
                     translate_and_post(client_instance, msg.text, msg.id, message_entity_urls=message_entity_urls),
                     timeout=processing_msg_timeout
                 )
-                if success: processed_count += 1
+                if sent_message: processed_count += 1
             except asyncio.TimeoutError:
                 logger.error(f"Timed out processing message {msg.id}")
             except Exception as e:
@@ -466,7 +534,7 @@ async def process_recent_messages(client, count):
                                 message_entity_urls.append(url_text)
             
             logger.info(f"Processing message ID: {msg.id}")
-            await translate_and_post(client, msg.text, msg.id, message_entity_urls=message_entity_urls)
+            sent_message = await translate_and_post(client, msg.text, msg.id, message_entity_urls=message_entity_urls)
             
             # Add a short delay between processing messages
             await asyncio.sleep(1)
@@ -561,7 +629,7 @@ async def background_update_checker(client):
                                                 message_entity_urls.append(url_text)
                             
                             logger.info(f"Processing potentially missed message ID: {msg.id}")
-                            await translate_and_post(client, msg.text, msg.id, message_entity_urls=message_entity_urls)
+                            sent_message = await translate_and_post(client, msg.text, msg.id, message_entity_urls=message_entity_urls)
                 
                 # Update last check time
                 last_check_time = now
@@ -593,25 +661,7 @@ async def main():
         )
         
         # Set up event handler
-        @client.on(events.NewMessage(chats=SRC_CHANNEL))
-        async def handler(event):
-            txt = event.message.text
-            if not txt: return
-            logger.info(f"Received new message: {txt[:50]}...")
-            
-            # Extract URLs from message entities
-            message_entity_urls = []
-            if hasattr(event.message, 'entities') and event.message.entities:
-                for entity in event.message.entities:
-                    if hasattr(entity, 'url') and entity.url:
-                        message_entity_urls.append(entity.url)
-                    elif hasattr(entity, '_') and entity._ in ('MessageEntityUrl', 'MessageEntityTextUrl'):
-                        if hasattr(entity, 'offset') and hasattr(entity, 'length'):
-                            url_text = txt[entity.offset:entity.offset + entity.length]
-                            if url_text.startswith('http'):
-                                message_entity_urls.append(url_text)
-            
-            await translate_and_post(client, event.message.text, event.message.id, message_entity_urls=message_entity_urls)
+        await setup_event_handlers(client)
         
         # Connect to Telegram
         logger.info("Starting Telegram client...")
@@ -619,6 +669,14 @@ async def main():
         
         # Save session to database after successful authentication
         save_session_after_auth(client)
+        
+        # In TEST_MODE process recent messages immediately so that polling-flow test which sends the
+        # message *before* the bot starts can still be picked up.
+        if TEST_MODE and os.getenv("TEST_RUN_MESSAGE_PREFIX"):
+            try:
+                await process_recent_posts(client, limit=20, timeout=120)
+            except Exception as e:
+                logger.warning(f"TEST_MODE pre-processing recent posts failed: {e}")
         
         # Process recent messages if requested
         if args.process_recent and args.process_recent > 0:
@@ -642,7 +700,7 @@ async def main():
                                 if url_text.startswith('http'):
                                     message_entity_urls.append(url_text)
                 
-                await translate_and_post(client, msg.text, msg.id, message_entity_urls=message_entity_urls)
+                sent_message = await translate_and_post(client, msg.text, msg.id, message_entity_urls=message_entity_urls)
                 await asyncio.sleep(2)  # Add delay between processing
             
             logger.info("Finished processing recent messages")

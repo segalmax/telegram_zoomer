@@ -92,7 +92,14 @@ def _embed(text: str) -> List[float]:
 # Public API
 # ---------------------------------------------------------------------------
 
-def save_pair(src: str, tgt: str, pair_id: str | None = None) -> None:
+def save_pair(
+    src: str, 
+    tgt: str, 
+    pair_id: str | None = None,
+    message_id: int | None = None,
+    channel_name: str | None = None,
+    message_url: str | None = None
+) -> None:
     """Upsert one (source, translation) pair into Supabase. No-op if store unavailable."""
     if _sb is None:
         logger.debug("💾 Supabase client not available, skipping save_pair")
@@ -102,7 +109,7 @@ def save_pair(src: str, tgt: str, pair_id: str | None = None) -> None:
         return
     
     pair_id = pair_id or str(uuid.uuid4())
-    logger.debug(f"💾 Starting save_pair: id={pair_id}, src_len={len(src)}, tgt_len={len(tgt)}")
+    logger.debug(f"💾 Starting save_pair: id={pair_id}, src_len={len(src)}, tgt_len={len(tgt)}, message_id={message_id}, url={message_url}")
     
     try:
         # Generate embedding
@@ -124,13 +131,21 @@ def save_pair(src: str, tgt: str, pair_id: str | None = None) -> None:
             "created_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
         }
         
+        # Add optional message metadata
+        if message_id is not None:
+            data["message_id"] = message_id
+        if channel_name is not None:
+            data["channel_name"] = channel_name
+        if message_url is not None:
+            data["message_url"] = message_url
+        
         # Save to database
         db_start = time.time()
         result = _sb.table("article_chunks").upsert(data).execute()  # type: ignore
         db_time = time.time() - db_start
         
         logger.debug(f"💾 Database upsert completed in {db_time:.3f}s")
-        logger.info(f"💾 Successfully saved pair {pair_id}: embed={embed_time:.3f}s, db={db_time:.3f}s")
+        logger.info(f"💾 Successfully saved pair {pair_id}: embed={embed_time:.3f}s, db={db_time:.3f}s, url={message_url}")
         
     except Exception as e:
         logger.error(f"💥 vector_store.save_pair failed for {pair_id}: {e}", exc_info=True)

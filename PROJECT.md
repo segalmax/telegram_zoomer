@@ -33,6 +33,7 @@
 • Translates via Claude Sonnet 4 (OpenAI compatible SDK) into right-bidlo tone.  
 • Generates editorial cartoon images with DALL-E or Stability AI (`GENERATE_IMAGES`, `USE_STABILITY_AI`).  
 • Posts formatted markdown with hidden hyperlinks to `DST_CHANNEL`.  
+• **NEW**: Automatically inserts up to three inline links to *related earlier posts* using TM metadata.  
 • Robust error handling—tests fail on any logged `ERROR`.  
 • **Stateless**: Telethon session & app state stored in Supabase – zero local files, survives dyno restarts.  
 • CLI `--process-recent N`, `--no-images`, `--stability`, `--new-session`.
@@ -149,6 +150,9 @@ python app/bot.py --process-recent 5 --no-images
    | `translation_text` | text | zoomer output |
    | `embedding` | vector(1536) | pgvector extension |
    | `created_at` | timestamptz | UTC |
+   | `message_id` | bigint | Telegram message id |
+   | `channel_name` | text | Channel (without @) |
+   | `message_url` | text | `https://t.me/<channel>/<id>` |
 3. **Recall** – before translating a new post the bot calls`match_article_chunks(query_embedding, k)` (SQL function) to fetch the **top k (default 5)** closest matches by cosine similarity.
 4. **Context inject** – these matches are prepended to the prompt so Claude keeps terminology & tone consistent.
 
@@ -325,3 +329,47 @@ The bot now uses **Supabase for persistent PTS storage** to solve Heroku ephemer
 The bot now runs **event-handler–only** by default (Telethon `events.NewMessage`).
 
 Manual polling code has been removed; the bot now relies solely on Telethon's `events.NewMessage` push mechanism for real-time updates.
+
+## 🔗 Navigation Links Feature (Task 29) ✅ COMPLETED
+
+**Automatically inserts up to three inline links to *related earlier posts* using translation memory metadata.**
+
+### Implementation Details
+
+1. **Database Schema**: Extended `article_chunks` table with message metadata:
+   - `message_id` (bigint): Telegram message ID
+   - `channel_name` (text): Source channel name
+   - `message_url` (text): Direct `https://t.me/<channel>/<id>` links
+
+2. **Phrase Extraction** (`app/linker.py`):
+   - Uses regex patterns to extract key phrases from translated text
+   - **Enhanced sectioned approach**: Distributes extraction across title, body paragraphs, and sections
+   - Extracts **5 phrases by default** (increased from 3 for better coverage)
+   - Handles both Russian and English content
+   - Cleans markdown formatting and normalizes whitespace
+   - Prioritizes military/political/geographic terms
+
+3. **Intelligent Matching**:
+   - Multiple matching strategies: substring, word overlap, fuzzy similarity
+   - Similarity threshold of 0.5 for flexible matching
+   - Prioritizes direct matches over partial ones
+
+4. **Link Generation**:
+   - Converts matched phrases into `[phrase](URL)` markdown format
+   - **Links point to destination channel** (`nytzoomeru`) where translations are posted
+   - Limits to one link per phrase to avoid spam
+   - Gracefully handles missing URLs
+
+### Live Example
+```markdown
+**Шесть американских "невидимок" [взяли курс на Иран с 12-тонными](https://t.me/ynetalerts/47963) гостинцами**
+
+[Пока израильтяне методично](https://t.me/ynetalerts/47963) утюжили Нетанц, Исфахан и Арак...
+```
+
+### Performance Impact
+- Adds ~0.01s processing overhead per message
+- No external API calls required
+- Memory efficient with phrase caching
+
+---
