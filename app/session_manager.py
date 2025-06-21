@@ -124,7 +124,64 @@ class DatabaseSession:
             return None
 
 def load_app_state():
-    """Load the application state from local file only."""
+    """Load the application state from database with file fallback."""
+    # Try database first
+    supabase_url = os.environ.get('SUPABASE_URL')
+    supabase_key = os.environ.get('SUPABASE_KEY')
+    
+    if supabase_url and supabase_key:
+        try:
+            import httpx
+            
+            # Determine environment
+            is_heroku = os.getenv('DYNO') is not None
+            is_test = os.getenv('TEST_MODE') == 'true'
+            
+            if is_test:
+                environment = "test"
+            elif is_heroku:
+                environment = "production"
+            else:
+                environment = "local"
+            
+            headers = {
+                'apikey': supabase_key,
+                'Authorization': f'Bearer {supabase_key}'
+            }
+            
+            response = httpx.get(
+                f"{supabase_url}/rest/v1/app_state",
+                headers=headers,
+                params={
+                    'environment': f'eq.{environment}',
+                    'select': '*',
+                    'limit': '1'
+                }
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                if data:
+                    state_data = data[0]
+                    logger.info(f"Loaded app state from database for environment: {environment}")
+                    
+                    # Convert timestamp string to datetime object
+                    if isinstance(state_data.get("timestamp"), str):
+                        state_data["timestamp"] = datetime.fromisoformat(state_data["timestamp"])
+                    
+                    # Ensure PTS is integer
+                    state_data["pts"] = int(state_data.get("pts", 0))
+                    
+                    return state_data
+                else:
+                    logger.info(f"No app state found in database for environment: {environment}")
+            else:
+                logger.warning(f"Failed to load app state from database: {response.status_code}")
+                
+        except Exception as e:
+            logger.warning(f"Error loading app state from database, falling back to file: {e}")
+    
+    # Fallback to local file
     if APP_STATE_FILE.exists():
         try:
             with open(APP_STATE_FILE, 'r') as f:
@@ -151,7 +208,7 @@ def load_app_state():
     return state_data
 
 def save_app_state(state_data):
-    """Save the application state to local file."""
+    """Save the application state to database with file fallback."""
     if not isinstance(state_data, dict):
         logger.error("Invalid state_data provided to save_app_state. Must be a dict.")
         return
@@ -166,7 +223,51 @@ def save_app_state(state_data):
     
     state_to_save["pts"] = int(state_to_save.get("pts", 0))
 
-    # Save to local file
+    # Try database first
+    supabase_url = os.environ.get('SUPABASE_URL')
+    supabase_key = os.environ.get('SUPABASE_KEY')
+    
+    if supabase_url and supabase_key:
+        try:
+            import httpx
+            
+            # Determine environment
+            is_heroku = os.getenv('DYNO') is not None
+            is_test = os.getenv('TEST_MODE') == 'true'
+            
+            if is_test:
+                environment = "test"
+            elif is_heroku:
+                environment = "production"
+            else:
+                environment = "local"
+            
+            headers = {
+                'apikey': supabase_key,
+                'Authorization': f'Bearer {supabase_key}',
+                'Content-Type': 'application/json',
+                'Prefer': 'resolution=merge-duplicates'
+            }
+            
+            # Add environment to state
+            state_to_save["environment"] = environment
+            
+            response = httpx.post(
+                f"{supabase_url}/rest/v1/app_state",
+                headers=headers,
+                json=state_to_save
+            )
+            
+            if response.status_code in [200, 201]:
+                logger.info(f"Saved app state to database for environment: {environment}")
+                return  # Success, no need for file fallback
+            else:
+                logger.warning(f"Failed to save app state to database: {response.status_code} {response.text}")
+                
+        except Exception as e:
+            logger.warning(f"Error saving app state to database, falling back to file: {e}")
+
+    # Fallback to local file
     try:
         APP_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
         with open(APP_STATE_FILE, 'w') as f:
