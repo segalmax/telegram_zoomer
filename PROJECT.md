@@ -36,6 +36,7 @@
 • Robust error handling—tests fail on any logged `ERROR`.  
 • **Stateless**: Telethon session & app state stored in Supabase – zero local files, survives dyno restarts.  
 • CLI `--process-recent N`, `--no-images`, `--stability`, `--new-session`.
+• *New*: Integrated **Sequential Thinking MCP** server for structured reasoning workflows during development.
 
 ---
 
