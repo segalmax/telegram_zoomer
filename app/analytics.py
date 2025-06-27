@@ -44,7 +44,6 @@ class TranslationSession:
     source_text_length: int
     article_url: Optional[str] = None
     article_text_length: Optional[int] = None
-    translation_style: str = "right"
     translation_text: Optional[str] = None
     translation_text_length: Optional[int] = None
     session_end_time: Optional[datetime] = None
@@ -120,7 +119,7 @@ class AnalyticsTracker:
             
             logger.debug(f"📊 Memory metrics: found={len(memories)}, avg_sim={self.current_session.avg_memory_similarity:.3f}")
     
-    def set_translation_result(self, translation_text: str, translation_time_ms: int, style: str = "right"):
+    def set_translation_result(self, translation_text: str, translation_time_ms: int):
         """Set translation result and timing"""
         if not self.current_session:
             return
@@ -128,7 +127,6 @@ class AnalyticsTracker:
         self.current_session.translation_text = translation_text
         self.current_session.translation_text_length = len(translation_text)
         self.current_session.translation_time_ms = translation_time_ms
-        self.current_session.translation_style = style
         
         logger.debug(f"📊 Translation result: {len(translation_text)} chars in {translation_time_ms}ms")
     

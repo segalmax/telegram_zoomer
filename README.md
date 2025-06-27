@@ -71,7 +71,7 @@ The bot is configured through environment variables set in `.env` and `app_setti
 | SRC_CHANNEL           | Source channel to monitor                   | Yes      | -             | `app_settings.env` |
 | DST_CHANNEL           | Destination channel to post translations    | Yes      | -             | `app_settings.env` |
 | GENERATE_IMAGES       | Whether to generate images for posts        | No       | true          | `app_settings.env` |
-| TRANSLATION_STYLE     | Translation style ('left', 'right', 'both') | No       | both          | `app_settings.env` |
+
 | HEROKU_APP_NAME       | Name of your Heroku app                     | No*      | -             | `app_settings.env` |
 | TG_COMPRESSED_SESSION_STRING | Compressed Base64 encoded Telethon session (Heroku) | No*      | -             | (set by `setup_heroku.sh`) |
 | LAST_PROCESSED_STATE  | Base64 encoded application state (Heroku)   | No*      | -             | (set by `setup_heroku.sh`) |
@@ -99,7 +99,7 @@ The application uses a dual environment file approach for better security and co
    DST_CHANNEL=destination_channel_username_or_id
    TEST_SRC_CHANNEL=test_source_channel  # For testing
    TEST_DST_CHANNEL=test_destination_channel  # For testing
-   TRANSLATION_STYLE=both  # 'left', 'right', or 'both'
+
    GENERATE_IMAGES=true  # 'true' or 'false'
    HEROKU_APP_NAME=your-heroku-app-name  # Used by setup_heroku.sh
    ```
@@ -123,7 +123,7 @@ The application uses a dual environment file approach for better security and co
     TG_SESSION=session/new_session 
     
     # Optional overrides:
-    # TRANSLATION_STYLE=both # 'left', 'right', or 'both' (default)
+
     # GENERATE_IMAGES=true # 'true' or 'false' (default)
     # USE_STABILITY_AI=false # 'true' or 'false' (default)
     # STABILITY_AI_API_KEY=your_stability_ai_key # Required if USE_STABILITY_AI is true
@@ -139,7 +139,7 @@ The application uses a dual environment file approach for better security and co
     *   `DST_CHANNEL`: The username or ID of the Telegram channel to post translations to.
     *   `TG_PHONE`: (Optional, for first auth) Your phone number (e.g., +1234567890). Bot will prompt if needed.
     *   `TG_SESSION`: (Optional) Session file name (without .session extension) used for local runs. Example: `session/my_bot_session`. The `setup_heroku.sh` script will use this to find your local session file for export.
-    *   `TRANSLATION_STYLE`, `GENERATE_IMAGES`, `USE_STABILITY_AI`, `STABILITY_AI_KEY`: See comments in example `.env`.
+    *   `GENERATE_IMAGES`, `USE_STABILITY_AI`, `STABILITY_AI_KEY`: See comments in example `.env`.
     *   `TG_SESSION_STRING`: (Heroku) Contains the Base64 encoded string of your Telethon session file. Managed by `setup_heroku.sh`.
     *   `LAST_PROCESSED_STATE`: (Heroku) Contains the Base64 encoded JSON string of the application's last known state (last message ID, timestamp, PTS). Managed by `setup_heroku.sh` and updated by the bot during operation (bot logs the new string to be updated on Heroku).
 

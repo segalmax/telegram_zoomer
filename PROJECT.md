@@ -67,7 +67,6 @@ Required (excerpt):
 API_ID, API_HASH, BOT_TOKEN           # Telegram
 OPENAI_API_KEY, ANTHROPIC_API_KEY     # LLMs / images
 SRC_CHANNEL, DST_CHANNEL              # Channel usernames
-TRANSLATION_STYLE=right               # fixed style
 GENERATE_IMAGES=true|false
 USE_STABILITY_AI=true|false
 TG_COMPRESSED_SESSION_STRING          # auto-generated
@@ -108,7 +107,7 @@ EMBED_MODEL                           # optional, default text-embedding-ada-002
 - Robust pytest suite
 
 ### ✅ Done (Recent)
-- **Translation Prompt Optimization (2025-01-20)**: Major improvements to RIGHT style prompt:
+- **Translation Prompt Optimization (2025-01-20)**: Major improvements to bidlo style prompt:
   - **Eliminated formulaic patterns**: No more "Ну что, товарищи...", "Классическая..." repetition
   - **Flow awareness**: Now aware it's part of chronological news feed
   - **Context adaptation**: Different tones for breaking news, politics, human drama, tech/science

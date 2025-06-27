@@ -93,10 +93,10 @@ async def test_api_translations(test_args):
     """Test translation functionality with Anthropic Claude."""
     client = get_anthropic_client(ANTHROPIC_KEY)
     assert client, "Anthropic client could not be initialized. Check ANTHROPIC_API_KEY."
-    logger.info("Testing RIGHT style translation...")
-    right_result = await translate_text(client, TEST_MESSAGE, 'right')
-    assert right_result and len(right_result) > 10, "RIGHT translation failed or returned empty/short result"
-    logger.info(f"RIGHT translation successful: {right_result[:100]}...")
+    logger.info("Testing RIGHT-BIDLO style translation...")
+    translation_result = await translate_text(client, TEST_MESSAGE)
+    assert translation_result and len(translation_result) > 10, "RIGHT-BIDLO translation failed or returned empty/short result"
+    logger.info(f"RIGHT-BIDLO translation successful: {translation_result[:100]}...")
 
 @pytest.mark.asyncio
 async def test_api_image_generation_dalle(test_args):

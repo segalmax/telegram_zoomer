@@ -140,13 +140,9 @@ def display_detailed_analytics(data: dict):
         print(f"Average Memories Found: {avg_memories:.1f}")
         print(f"Average Similarity: {avg_similarity:.3f}")
     
-    # Translation styles
-    style_counts = {}
-    for session in sessions:
-        style = session.get('translation_style', 'unknown')
-        style_counts[style] = style_counts.get(style, 0) + 1
-    
-    print(f"Translation Styles: {dict(style_counts)}")
+    # Translation statistics (single bidlo style only)
+    total_translations = len([s for s in sessions if s.get('translation_text')])
+    print(f"Total Translations: {total_translations}")
     
     # Error analysis
     failed_sessions = [s for s in sessions if not s.get('success', True)]

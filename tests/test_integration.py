@@ -56,7 +56,7 @@ async def test_article_extraction_integration():
         pytest.skip("No Anthropic API key available for translation test")
     
     client = get_anthropic_client(api_key)
-    translated = await translate_text(client, translation_context, 'left')
+    translated = await translate_text(client, translation_context)
     
     print(f"\n=== Translation Result ===")
     print(f"Translated text length: {len(translated)} characters")

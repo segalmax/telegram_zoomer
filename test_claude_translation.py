@@ -47,26 +47,20 @@ async def test_claude_translation():
     print(f"Original text: {test_text}")
     
     try:
-        # Test RIGHT style translation
-        print("\n🔄 Testing RIGHT style translation...")
-        translated_right = await translate_text(client, test_text, 'right')
-        print(f"✅ RIGHT translation: {translated_right[:100]}...")
+        # Test RIGHT-BIDLO style translation (only style supported)
+        print("\n🔄 Testing RIGHT-BIDLO style translation...")
+        translated_text = await translate_text(client, test_text)
+        print(f"✅ RIGHT-BIDLO translation: {translated_text[:100]}...")
         
-        # Test LEFT style translation  
-        print("\n🔄 Testing LEFT style translation...")
-        translated_left = await translate_text(client, test_text, 'left')
-        print(f"✅ LEFT translation: {translated_left[:100]}...")
+        # Validate translation contains Russian characters
+        has_russian = any(ord('а') <= ord(c) <= ord('я') or ord('А') <= ord(c) <= ord('Я') for c in translated_text)
         
-        # Validate translations contain Russian characters
-        has_russian_right = any(ord('а') <= ord(c) <= ord('я') or ord('А') <= ord(c) <= ord('Я') for c in translated_right)
-        has_russian_left = any(ord('а') <= ord(c) <= ord('я') or ord('А') <= ord(c) <= ord('Я') for c in translated_left)
-        
-        if has_russian_right and has_russian_left:
-            print("✅ Both translations contain Russian characters")
+        if has_russian:
+            print("✅ Translation contains Russian characters")
             print("✅ Claude translation integration test PASSED!")
             return True
         else:
-            print("❌ Translations missing Russian characters")
+            print("❌ Translation missing Russian characters")
             return False
             
     except Exception as e:

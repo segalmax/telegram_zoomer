@@ -53,7 +53,6 @@ PHONE = os.getenv('PHONE') or os.getenv('TG_PHONE')  # Check both variable names
 
 SRC_CHANNEL = os.getenv('SRC_CHANNEL')
 DST_CHANNEL = os.getenv('DST_CHANNEL')
-TRANSLATION_STYLE = os.getenv('TRANSLATION_STYLE', 'right')  # right only by default
 GENERATE_IMAGES = os.getenv('GENERATE_IMAGES', 'true').lower() == 'true'
 ANTHROPIC_KEY = os.getenv('ANTHROPIC_API_KEY')
 PROCESS_RECENT = os.getenv('PROCESS_RECENT', 0)
@@ -172,9 +171,6 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
             
             return sent_message
 
-        # Get translation style from environment (default to 'both')
-        translation_style = os.getenv("TRANSLATION_STYLE", "right").lower()
-
         # Check for Anthropic client *before* attempting to translate
         if not anthropic_client:
             logger.error("Cannot translate without Anthropic client.")
@@ -250,71 +246,57 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
             sent_message = await send_message_parts(dst_channel_to_use, right_content, image_data, image_url_str)
             # Skip saving to TM in fast test mode to reduce Supabase traffic
         else:
-            if translation_style == 'right' or translation_style == 'both':
-                logger.info("Translating in RIGHT-BIDLO style...")
-                translation_start = time.time()
-                translated_text = await translate_text(anthropic_client, translation_context, 'right')
-                translation_time_ms = int((time.time() - translation_start) * 1000)
-                
-                # Track translation result
-                analytics.set_translation_result(translated_text, translation_time_ms, 'right')
-                
-                # Inject navigation links to previous messages (best effort)
-                linked_text = add_navigation_links(translated_text, memory, max_phrases=5)
+            # Always use right-bidlo style (only style supported)
+            logger.info("Translating in RIGHT-BIDLO style...")
+            translation_start = time.time()
+            translated_text = await translate_text(anthropic_client, translation_context)
+            translation_time_ms = int((time.time() - translation_start) * 1000)
+            
+            # Track translation result
+            analytics.set_translation_result(translated_text, translation_time_ms)
+            
+            # Inject navigation links to previous messages (best effort)
+            linked_text = add_navigation_links(translated_text, memory, max_phrases=5)
 
-                logger.info("Safety check disabled - posting Lurkmore-style translation with navigation links")
-                right_content = f"{linked_text}{source_footer}"
-                logger.info(f"📝 Final post content preview: {right_content[:200]}...")
-                sent_message = await send_message_parts(dst_channel_to_use, right_content, image_data, image_url_str)
-                logger.info(f"Posted right-bidlo version")
+            logger.info("Safety check disabled - posting Lurkmore-style translation with navigation links")
+            right_content = f"{linked_text}{source_footer}"
+            logger.info(f"📝 Final post content preview: {right_content[:200]}...")
+            sent_message = await send_message_parts(dst_channel_to_use, right_content, image_data, image_url_str)
+            logger.info(f"Posted right-bidlo version")
+            
+            # Persist pair in translation memory (best-effort) 
+            save_start_time = time.time()
+            try:
+                pair_id = f"{message_id}-right" if message_id else str(uuid.uuid4())
+                logger.info(f"💾 Saving translation pair to memory: {pair_id}")
+                logger.debug(f"📝 Source length: {len(txt)} chars, Translation length: {len(translated_text)} chars")
                 
-                # Persist pair in translation memory (best-effort) 
-                save_start_time = time.time()
-                try:
-                    pair_id = f"{message_id}-right" if message_id else str(uuid.uuid4())
-                    logger.info(f"💾 Saving translation pair to memory: {pair_id}")
-                    logger.debug(f"📝 Source length: {len(txt)} chars, Translation length: {len(translated_text)} chars")
-                    
-                    # Construct destination message URL from the sent message
-                    destination_message_url = None
-                    if sent_message and hasattr(sent_message, 'id'):
-                        # Remove @ from channel name and construct t.me URL
-                        dest_channel_clean = dst_channel_to_use.replace("@", "")
-                        destination_message_url = f"https://t.me/{dest_channel_clean}/{sent_message.id}"
-                        logger.info(f"🔗 Constructed destination URL: {destination_message_url}")
-                    
-                    store_tm(
-                        src=txt,
-                        tgt=translated_text,
-                        pair_id=pair_id,
-                        message_id=sent_message.id if sent_message else message_id,
-                        channel_name=dst_channel_to_use.replace("@", ""),
-                        message_url=destination_message_url,
-                    )
-                    save_time = time.time() - save_start_time
-                    logger.info(f"✅ Translation pair saved successfully in {save_time:.3f}s: {pair_id}")
-                    
-                    # Track save time in analytics
-                    analytics.set_memory_save_time(int(save_time * 1000))
-                    
-                except Exception as e:
-                    save_time = time.time() - save_start_time
-                    logger.error(f"💥 TM save failed for {pair_id} after {save_time:.3f}s: {e}", exc_info=True)
-                    analytics.set_error(f"Memory save failed: {e}")
-            else:
-                logger.info("Translating in LEFT-ZOOMER style...")
-                translated_text = await translate_text(anthropic_client, translation_context, 'left')
-
-                # Add navigation links for left version as well
-                linked_text_left = add_navigation_links(translated_text, memory, max_phrases=5)
+                # Construct destination message URL from the sent message
+                destination_message_url = None
+                if sent_message and hasattr(sent_message, 'id'):
+                    # Remove @ from channel name and construct t.me URL
+                    dest_channel_clean = dst_channel_to_use.replace("@", "")
+                    destination_message_url = f"https://t.me/{dest_channel_clean}/{sent_message.id}"
+                    logger.info(f"🔗 Constructed destination URL: {destination_message_url}")
                 
-                # Safety check disabled for unfiltered translations  
-                logger.info("Safety check disabled - posting LEFT-ZOOMER translation with navigation links")
-                left_content = f"🔵 LEFT-ZOOMER VERSION:\n\n{linked_text_left}{source_footer}"
-                sent_message = await send_message_parts(dst_channel_to_use, left_content, None, None)
-                logger.info(f"Posted left-zoomer version")
+                store_tm(
+                    src=txt,
+                    tgt=translated_text,
+                    pair_id=pair_id,
+                    message_id=sent_message.id if sent_message else message_id,
+                    channel_name=dst_channel_to_use.replace("@", ""),
+                    message_url=destination_message_url,
+                )
+                save_time = time.time() - save_start_time
+                logger.info(f"✅ Translation pair saved successfully in {save_time:.3f}s: {pair_id}")
                 
-                # TODO: Add TM saving for left translations if needed
+                # Track save time in analytics
+                analytics.set_memory_save_time(int(save_time * 1000))
+                
+            except Exception as e:
+                save_time = time.time() - save_start_time
+                logger.error(f"💥 TM save failed for {pair_id} after {save_time:.3f}s: {e}", exc_info=True)
+                analytics.set_error(f"Memory save failed: {e}")
         
         logger.info(f"Total processing time for message: {time.time() - start_time:.2f} seconds")
         
