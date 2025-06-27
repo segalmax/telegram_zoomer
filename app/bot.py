@@ -341,37 +341,6 @@ async def setup_event_handlers(client_instance):
         except Exception as e:
             logger.error(f"Error in handle_new_message: {str(e)}", exc_info=True)
 
-    @client_instance.on(events.NewMessage(chats=SRC_CHANNEL))
-    async def handler(event):
-        try:
-            txt = event.message.text
-            if not txt: return
-            logger.info(f"Received new message: {txt[:50]}...")
-            
-            # Extract URLs from message entities
-            message_entity_urls = []
-            if hasattr(event.message, 'entities') and event.message.entities:
-                for entity in event.message.entities:
-                    if hasattr(entity, 'url') and entity.url:
-                        message_entity_urls.append(entity.url)
-                    elif hasattr(entity, '_') and entity._ in ('MessageEntityUrl', 'MessageEntityTextUrl'):
-                        if hasattr(entity, 'offset') and hasattr(entity, 'length'):
-                            url_text = txt[entity.offset:entity.offset + entity.length]
-                            if url_text.startswith('http'):
-                                message_entity_urls.append(url_text)
-            
-            sent_message = await translate_and_post(client_instance, txt, event.message.id, message_entity_urls=message_entity_urls)
-            if sent_message:
-                current_state = load_app_state()
-                current_state['message_id'] = event.message.id
-                current_state['timestamp'] = event.message.date.isoformat() # Ensure ISO format
-                # PTS is not directly available here, rely on GetChannelDifference for PTS updates
-                # If this handler is primary, might need a way to estimate or fetch PTS if critical
-                save_app_state(current_state)
-                logger.info(f"App state updated after processing new message ID {event.message.id}")
-        except Exception as e:
-            logger.error(f"Error in handle_new_message: {str(e)}", exc_info=True)
-
 async def process_recent_posts(client_instance, limit=10, timeout=300):
     # Renamed client to client_instance
     try:
