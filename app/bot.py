@@ -241,7 +241,14 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
             # Fast path for unit/integration tests – avoid external API calls
             logger.info("TEST_MODE fast-translation enabled – skipping Anthropic API call")
             linked_text = f"[TEST] {txt[:200]}"
-            right_content = f"{linked_text}{source_footer}"
+            
+            # Add invisible article link at the beginning for proper Telegram thumbnail
+            invisible_article_link = ""
+            if message_entity_urls and len(message_entity_urls) > 0:
+                invisible_article_link = f"[\u200B]({message_entity_urls[0]})"
+                logger.info(f"Added invisible article link for thumbnail: {message_entity_urls[0]}")
+            
+            right_content = f"{invisible_article_link}{linked_text}{source_footer}"
             sent_message = await send_message_parts(dst_channel_to_use, right_content, image_data, image_url_str)
             # Skip saving to TM in fast test mode to reduce Supabase traffic
         else:
@@ -255,7 +262,14 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
             analytics.set_translation_result(linked_text, translation_time_ms)
 
             logger.info("Safety check disabled - posting Lurkmore-style translation with navigation links")
-            right_content = f"{linked_text}{source_footer}"
+            
+            # Add invisible article link at the beginning for proper Telegram thumbnail
+            invisible_article_link = ""
+            if message_entity_urls and len(message_entity_urls) > 0:
+                invisible_article_link = f"[\u200B]({message_entity_urls[0]})"
+                logger.info(f"Added invisible article link for thumbnail: {message_entity_urls[0]}")
+            
+            right_content = f"{invisible_article_link}{linked_text}{source_footer}"
             logger.info(f"📝 Final post content preview: {right_content[:200]}...")
             sent_message = await send_message_parts(dst_channel_to_use, right_content, image_data, image_url_str)
             logger.info(f"Posted right-bidlo version")
