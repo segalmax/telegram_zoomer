@@ -44,12 +44,7 @@ def pytest_addoption(parser):
     parser.addoption(
         "--bot-mode", action="store_true", default=False, help="Run the actual bot with test channels (for Heroku tests)"
     )
-    parser.addoption(
-        "--stability", action="store_true", default=False, help="Test with Stability AI image generation"
-    )
-    parser.addoption(
-        "--no-images", action="store_true", default=False, help="Disable image generation for testing"
-    )
+
     parser.addoption(
         "--new-session", action="store_true", default=False, help="Force creation of a new session (requires re-authentication)"
     )
@@ -61,13 +56,7 @@ def pytest_addoption(parser):
 def bot_mode_option(request):
     return request.config.getoption("--bot-mode")
 
-@pytest.fixture
-def stability_option(request):
-    return request.config.getoption("--stability")
 
-@pytest.fixture
-def no_images_option(request):
-    return request.config.getoption("--no-images")
 
 @pytest.fixture
 def new_session_option(request):
@@ -78,13 +67,11 @@ def process_recent_option(request):
     return request.config.getoption("--process-recent")
 
 @pytest.fixture
-def test_args(bot_mode_option, stability_option, no_images_option, new_session_option, process_recent_option):
+def test_args(bot_mode_option, new_session_option, process_recent_option):
     """Provides a namespace similar to argparse.Namespace for compatibility with existing test functions."""
     class Args:
         def __init__(self):
             self.bot_mode = bot_mode_option
-            self.stability = stability_option
-            self.no_images = no_images_option
             self.new_session = new_session_option
             self.process_recent = process_recent_option
             # Ensure all attributes from the original args are present if functions expect them

@@ -66,11 +66,9 @@ The bot is configured through environment variables set in `.env` and `app_setti
 | TG_API_ID             | Telegram API ID                             | Yes      | -             | `.env`        |
 | TG_API_HASH           | Telegram API Hash                           | Yes      | -             | `.env`        |
 | TG_PHONE              | Phone number for Telegram authentication    | Yes      | -             | `.env`        |
-| OPENAI_API_KEY        | OpenAI API key                              | Yes      | -             | `.env`        |
-| STABILITY_AI_API_KEY  | Stability AI API key (if used)              | No       | -             | `.env`        |
+| OPENAI_API_KEY        | OpenAI API key (legacy - not used)          | No       | -             | `.env`        |
 | SRC_CHANNEL           | Source channel to monitor                   | Yes      | -             | `app_settings.env` |
 | DST_CHANNEL           | Destination channel to post translations    | Yes      | -             | `app_settings.env` |
-| GENERATE_IMAGES       | Whether to generate images for posts        | No       | true          | `app_settings.env` |
 
 | HEROKU_APP_NAME       | Name of your Heroku app                     | No*      | -             | `app_settings.env` |
 | TG_COMPRESSED_SESSION_STRING | Compressed Base64 encoded Telethon session (Heroku) | No*      | -             | (set by `setup_heroku.sh`) |
@@ -89,7 +87,6 @@ The application uses a dual environment file approach for better security and co
    TG_API_HASH=your_telegram_api_hash
    TG_PHONE=your_phone_number
    OPENAI_API_KEY=your_openai_api_key
-   STABILITY_AI_API_KEY=your_stability_ai_key  # Optional
    ```
 
 2. **Create an `app_settings.env` file** for non-sensitive application settings:
@@ -100,7 +97,6 @@ The application uses a dual environment file approach for better security and co
    TEST_SRC_CHANNEL=test_source_channel  # For testing
    TEST_DST_CHANNEL=test_destination_channel  # For testing
 
-   GENERATE_IMAGES=true  # 'true' or 'false'
    HEROKU_APP_NAME=your-heroku-app-name  # Used by setup_heroku.sh
    ```
 
@@ -124,9 +120,7 @@ The application uses a dual environment file approach for better security and co
     
     # Optional overrides:
 
-    # GENERATE_IMAGES=true # 'true' or 'false' (default)
-    # USE_STABILITY_AI=false # 'true' or 'false' (default)
-    # STABILITY_AI_API_KEY=your_stability_ai_key # Required if USE_STABILITY_AI is true
+ 
     ```
 
 2.  Fill in your actual credentials and desired channel names in the `.env` file.
@@ -139,7 +133,7 @@ The application uses a dual environment file approach for better security and co
     *   `DST_CHANNEL`: The username or ID of the Telegram channel to post translations to.
     *   `TG_PHONE`: (Optional, for first auth) Your phone number (e.g., +1234567890). Bot will prompt if needed.
     *   `TG_SESSION`: (Optional) Session file name (without .session extension) used for local runs. Example: `session/my_bot_session`. The `setup_heroku.sh` script will use this to find your local session file for export.
-    *   `GENERATE_IMAGES`, `USE_STABILITY_AI`, `STABILITY_AI_KEY`: See comments in example `.env`.
+ 
     *   `TG_SESSION_STRING`: (Heroku) Contains the Base64 encoded string of your Telethon session file. Managed by `setup_heroku.sh`.
     *   `LAST_PROCESSED_STATE`: (Heroku) Contains the Base64 encoded JSON string of the application's last known state (last message ID, timestamp, PTS). Managed by `setup_heroku.sh` and updated by the bot during operation (bot logs the new string to be updated on Heroku).
 

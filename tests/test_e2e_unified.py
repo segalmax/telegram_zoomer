@@ -2,15 +2,14 @@
 Unified test script for Telegram Zoomer Bot (pytest-harnessed)
 
 This script provides complete end-to-end testing:
-1. API Integration - Tests OpenAI and Stability AI
+1. API Integration - Tests Anthropic Claude for translation
 2. Telegram Pipeline - Tests the full message flow through Telegram
 3. Bot Mode - Runs the bot against test channels for E2E validation.
 
 Usage (pytest):
   pytest tests/test_e2e_unified.py                 # Run standard E2E flow
   pytest tests/test_e2e_unified.py --bot-mode      # Run in bot mode
-  pytest tests/test_e2e_unified.py --stability     # Test with Stability AI
-  pytest tests/test_e2e_unified.py --no-images     # Disable image generation
+  
   pytest tests/test_e2e_unified.py --new-session   # Force new Telegram session
   pytest tests/test_e2e_unified.py --process-recent N # Process N recent messages in bot mode
 """
@@ -34,7 +33,7 @@ import pytest # Added pytest
 # For now, direct import if 'app' is discoverable (e.g. via PYTHONPATH or project structure)
 import app.bot
 from app.translator import get_anthropic_client, translate_and_link
-from app.image_generator import generate_image_for_post, generate_image_with_stability_ai
+
 # Original bot.main is renamed to bot_main_entry for clarity to avoid confusion with this script's previous main
 from app.bot import main as bot_main_entry, translate_and_post as original_bot_translate_and_post
 from app.pts_manager import load_pts, save_pts
@@ -99,77 +98,6 @@ async def test_api_translations(test_args):
     assert translation_result and len(translation_result) > 10, "RIGHT-BIDLO translation failed or returned empty/short result"
     logger.info(f"RIGHT-BIDLO translation successful: {translation_result[:100]}...")
 
-@pytest.mark.asyncio
-async def test_api_image_generation_dalle(test_args):
-    """Test image generation with DALL-E."""
-    if test_args.no_images:
-        pytest.skip("Image generation disabled by --no-images flag")
-    if test_args.stability:
-        pytest.skip("Skipping DALL-E test when --stability is enabled")
-
-    # Image generation still uses OpenAI for DALL-E
-    openai_key = os.getenv('OPENAI_API_KEY')
-    if not openai_key:
-        pytest.skip("OPENAI_API_KEY not found, skipping DALL-E test")
-    
-    from app.image_generator import get_openai_client
-    client = get_openai_client(openai_key)
-    assert client, "OpenAI client could not be initialized. Check OPENAI_API_KEY."
-    logger.info("Testing DALL-E image generation...")
-    longer_test_text = (
-        "BREAKING NEWS: Scientists discover fascinating new species of deep-sea creatures "
-        "near hydrothermal vents in the Pacific Ocean. The newly discovered species include "
-        "unique adaptations to extreme pressure and temperature conditions found in these depths."
-    )
-    # Set USE_STABILITY_AI to false for this DALL-E specific test
-    original_stability_env = os.environ.pop('USE_STABILITY_AI', None)
-    os.environ['GENERATE_IMAGES'] = 'true' # Ensure images are on for this specific test
-    try:
-        result = await generate_image_for_post(client, longer_test_text)
-        assert result, "DALL-E image generation failed or returned None"
-        if isinstance(result, BytesIO):
-            image_data = result.getvalue()
-            assert len(image_data) > 1000, f"DALL-E image data too small: {len(image_data)} bytes"
-            logger.info("DALL-E image generation successful (BytesIO)")
-        elif isinstance(result, str): # URL
-            assert result.startswith("http"), "DALL-E returned a non-URL string"
-            logger.info(f"DALL-E image generation returned a URL: {result[:50]}...")
-        else:
-            pytest.fail(f"Unknown result type from DALL-E: {type(result)}")
-    finally:
-        if original_stability_env is not None:
-            os.environ['USE_STABILITY_AI'] = original_stability_env
-        os.environ.pop('GENERATE_IMAGES', None)
-
-@pytest.mark.asyncio
-async def test_api_image_generation_stability(test_args):
-    """Test image generation with Stability AI."""
-    if test_args.no_images:
-        pytest.skip("Image generation disabled by --no-images flag")
-    if not test_args.stability:
-        pytest.skip("Skipping Stability AI test; --stability flag not provided.")
-    if not os.getenv('STABILITY_AI_API_KEY'):
-        pytest.skip("STABILITY_AI_API_KEY not found, skipping Stability AI test")
-
-    logger.info("Testing Stability AI image generation...")
-    # Set USE_STABILITY_AI to true for this Stability specific test
-    original_stability_env = os.environ.pop('USE_STABILITY_AI', None)
-    os.environ['USE_STABILITY_AI'] = 'true'
-    os.environ['GENERATE_IMAGES'] = 'true' # Ensure images are on
-    try:
-        result = await generate_image_with_stability_ai(TEST_MESSAGE)
-        assert result, "Stability AI image generation failed or returned None"
-        assert isinstance(result, BytesIO), f"Unexpected result type from Stability AI: {type(result)}"
-        image_data = result.getvalue()
-        assert len(image_data) > 1000, f"Stability AI image data too small: {len(image_data)} bytes"
-        logger.info("Stability AI image generation successful")
-    finally:
-        if original_stability_env is not None:
-            os.environ['USE_STABILITY_AI'] = original_stability_env
-        else: # If it wasn't set before, ensure it's removed
-            os.environ.pop('USE_STABILITY_AI', None)
-        os.environ.pop('GENERATE_IMAGES', None)
-
 
 async def verify_message_in_channel(client, channel, content_fragment, timeout=300, limit=10):
     """Check if a message containing the fragment appears in the channel within timeout"""
@@ -222,18 +150,12 @@ async def test_telegram_pipeline(test_args):
     logger.info("Using database-backed test session")
 
     client = None
-    original_use_stability_env = os.environ.get('USE_STABILITY_AI')
-    original_generate_images_env = os.environ.get('GENERATE_IMAGES')
     original_test_mode_env = os.environ.get('TEST_MODE')
 
     try:
         os.environ['TEST_MODE'] = 'true'
-        os.environ['USE_STABILITY_AI'] = 'true' if test_args.stability else 'false'
-        os.environ['GENERATE_IMAGES'] = 'false' if test_args.no_images else 'true'
         
-        stability_status = "enabled" if test_args.stability else "disabled"
-        images_status = "disabled" if test_args.no_images else "enabled"
-        logger.info(f"Telegram test: Stability AI {stability_status}, Images {images_status}")
+
 
         client = TelegramClient(
             test_session, int(API_ID), API_HASH,
@@ -309,15 +231,7 @@ async def test_telegram_pipeline(test_args):
             article_link_verified = await verify_message_in_channel(client, TEST_DST_CHANNEL, message_entity_urls[0], timeout=60, limit=20)
             assert article_link_verified, f"Failed to verify article link fragment '{message_entity_urls[0]}' in destination channel"
 
-        if not test_args.no_images:
-            logger.info("Verifying image was posted (since --no-images is false)...")
-            messages = await client.get_messages(TEST_DST_CHANNEL, limit=15)
-            has_media = any(msg.media for msg in messages if msg)
-            if not has_media:
-                logger.warning("No media found in recent messages in destination channel. Image might not have been posted or visible.")
-            else:
-                logger.info("Found message with media in destination channel.")
-            # Consider adding: assert has_media, "Image was expected but not found in destination channel messages."
+
 
         logger.info("✅ Telegram pipeline test completed successfully!")
 
@@ -334,11 +248,6 @@ async def test_telegram_pipeline(test_args):
         # Database sessions don't need file cleanup
         logger.info("Using database-backed session - no file cleanup needed")
         
-        # Restore original env vars
-        if original_use_stability_env is not None: os.environ['USE_STABILITY_AI'] = original_use_stability_env
-        else: os.environ.pop('USE_STABILITY_AI', None)
-        if original_generate_images_env is not None: os.environ['GENERATE_IMAGES'] = original_generate_images_env
-        else: os.environ.pop('GENERATE_IMAGES', None)
         if original_test_mode_env is not None: os.environ['TEST_MODE'] = original_test_mode_env
         else: os.environ.pop('TEST_MODE', None)
 
@@ -355,14 +264,12 @@ async def test_run_bot_mode(test_args, bot_mode_option):
 
     original_src_env = os.environ.get('SRC_CHANNEL')
     original_dst_env = os.environ.get('DST_CHANNEL')
-    original_generate_images_env = os.environ.get('GENERATE_IMAGES')
     original_test_mode_env = os.environ.get('TEST_MODE')
 
     os.environ['SRC_CHANNEL'] = TEST_SRC_CHANNEL
     os.environ['DST_CHANNEL'] = TEST_DST_CHANNEL
     os.environ['TEST_MODE'] = 'true'
-    os.environ['GENERATE_IMAGES'] = 'false' if test_args.no_images else 'true'
-    if test_args.no_images: logger.info("Image generation disabled for bot mode")
+
 
     message_processed_event = asyncio.Event()
     async def wrapped_translate_and_post_for_bot_mode(client, txt, message_id=None, destination_channel=None, message_entity_urls=None):
@@ -413,8 +320,6 @@ async def test_run_bot_mode(test_args, bot_mode_option):
         else: os.environ.pop('SRC_CHANNEL', None)
         if original_dst_env: os.environ['DST_CHANNEL'] = original_dst_env
         else: os.environ.pop('DST_CHANNEL', None)
-        if original_generate_images_env: os.environ['GENERATE_IMAGES'] = original_generate_images_env
-        else: os.environ.pop('GENERATE_IMAGES', None)
         if original_test_mode_env is not None: os.environ['TEST_MODE'] = original_test_mode_env
         else: os.environ.pop('TEST_MODE', None)
     logger.info("🎉 Bot mode test completed.")

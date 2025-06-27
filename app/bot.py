@@ -18,7 +18,7 @@ from telethon import utils
 import anthropic
 from dotenv import load_dotenv
 from .translator import get_anthropic_client, translate_and_link, safety_check_translation
-from .image_generator import generate_image_for_post
+
 from .session_manager import setup_session, load_app_state, save_app_state, save_session_after_auth
 from telethon.tl.functions.account import UpdateStatusRequest
 from telethon.errors import SessionPasswordNeededError
@@ -53,13 +53,13 @@ PHONE = os.getenv('PHONE') or os.getenv('TG_PHONE')  # Check both variable names
 
 SRC_CHANNEL = os.getenv('SRC_CHANNEL')
 DST_CHANNEL = os.getenv('DST_CHANNEL')
-GENERATE_IMAGES = os.getenv('GENERATE_IMAGES', 'true').lower() == 'true'
+
 ANTHROPIC_KEY = os.getenv('ANTHROPIC_API_KEY')
 PROCESS_RECENT = os.getenv('PROCESS_RECENT', 0)
 CHECK_CHANNEL_INTERVAL = int(os.getenv('CHECK_CHANNEL_INTERVAL', '300'))  # Default to 5 minutes
 KEEP_ALIVE_INTERVAL = int(os.getenv('KEEP_ALIVE_INTERVAL', '60'))  # Keep connection alive every minute
 MANUAL_POLL_INTERVAL = int(os.getenv('MANUAL_POLL_INTERVAL', '180'))  # Manual polling every 3 minutes
-USE_STABILITY_AI = os.getenv('USE_STABILITY_AI', 'false').lower() == 'true'
+
 
 # Configure logging
 logging.basicConfig(
@@ -123,19 +123,6 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
         
         dst_channel_to_use = destination_channel or DST_CHANNEL
         logger.info(f"Using destination channel: {dst_channel_to_use}")
-        
-        image_data = None
-        image_url_str = None  # Renamed from image_url to avoid confusion
-        
-        # Re-evaluate GENERATE_IMAGES at runtime so that tests
-        # can control it via environment variables _after_ this module
-        # has already been imported.
-        generate_images = os.getenv("GENERATE_IMAGES", "true").lower() == "true"
-
-        # Note: Image generation still requires OpenAI, so we'll skip it for now with Claude
-        # TODO: Implement image generation with Claude or keep separate OpenAI client for images
-        if generate_images:
-            logger.warning("Image generation temporarily disabled during Claude translation upgrade")
 
         # Get the original message link format: https://t.me/c/CHANNEL_ID/MESSAGE_ID
         # or for public channels: https://t.me/CHANNEL_NAME/MESSAGE_ID
@@ -151,24 +138,9 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
             source_footer += f"\n🔗 [Ссылка из статьи]({message_entity_urls[0]})"
             logger.info(f"Including extracted URL from message: {message_entity_urls[0]}")
         
-        async def send_message_parts(channel, text_content, image_file=None, image_url_link=None):
+        async def send_message_parts(channel, text_content):
             """Send message parts and return the sent message object for navigation link tracking."""
-            sent_message = None
-            if image_file:
-                # Use up to 1024 characters for caption
-                caption = text_content[:1024]
-                sent_message = await client_instance.send_file(channel, image_file, caption=caption, parse_mode='md')
-                # If text is too long for caption, send the rest as a separate message
-                if len(text_content) > 1024:
-                    remaining_text = text_content[1024:]
-                    if remaining_text.strip(): # ensure remaining_text actually has content
-                        await client_instance.send_message(channel, remaining_text, parse_mode='md')
-            elif image_url_link:
-                full_message = f"{text_content}\\n\\n🖼️ {image_url_link}"
-                sent_message = await client_instance.send_message(channel, full_message, parse_mode='md')
-            else:
-                sent_message = await client_instance.send_message(channel, text_content, parse_mode='md')
-            
+            sent_message = await client_instance.send_message(channel, text_content, parse_mode='md')
             return sent_message
 
         # Check for Anthropic client *before* attempting to translate
@@ -249,7 +221,7 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
                 logger.info(f"Added invisible article link for thumbnail: {message_entity_urls[0]}")
             
             right_content = f"{invisible_article_link}{linked_text}{source_footer}"
-            sent_message = await send_message_parts(dst_channel_to_use, right_content, image_data, image_url_str)
+            sent_message = await send_message_parts(dst_channel_to_use, right_content)
             # Skip saving to TM in fast test mode to reduce Supabase traffic
         else:
             # Always use right-bidlo style (only style supported)
@@ -271,7 +243,7 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
             
             right_content = f"{invisible_article_link}{linked_text}{source_footer}"
             logger.info(f"📝 Final post content preview: {right_content[:200]}...")
-            sent_message = await send_message_parts(dst_channel_to_use, right_content, image_data, image_url_str)
+            sent_message = await send_message_parts(dst_channel_to_use, right_content)
             logger.info(f"Posted right-bidlo version")
             
             # Persist pair in translation memory (best-effort) 

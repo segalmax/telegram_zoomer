@@ -1,6 +1,6 @@
 # Telegram News-to-Zoomer Bot – Concise Project Guide
 
-> A Telegram bot that converts New York Times posts into edgy Russian zoomer slang (RIGHT-BIDLO style), optionally adds caricature images, and republishes them to a destination channel.  Focus: quick value delivery (MVP first), Heroku-friendly, fully tested.
+> A Telegram bot that converts New York Times posts into edgy Russian zoomer slang (RIGHT-BIDLO style) and republishes them to a destination channel. Focus: quick value delivery (MVP first), Heroku-friendly, fully tested.
 
 ---
 
@@ -31,12 +31,12 @@
 ## 2. Key Features
 • Listens to `SRC_CHANNEL`, fetches full article text (newspaper4k) if URL present.  
 • Translates via Claude Sonnet 4 (OpenAI compatible SDK) into right-bidlo tone.  
-• Generates editorial cartoon images with DALL-E or Stability AI (`GENERATE_IMAGES`, `USE_STABILITY_AI`).  
+  
 • Posts formatted markdown with hidden hyperlinks to `DST_CHANNEL`.  
 • **NEW**: Automatically inserts up to three inline links to *related earlier posts* using TM metadata.  
 • Robust error handling—tests fail on any logged `ERROR`.  
 • **Stateless**: Telethon session & app state stored in Supabase – zero local files, survives dyno restarts.  
-• CLI `--process-recent N`, `--no-images`, `--stability`, `--new-session`.
+• CLI `--process-recent N`, `--new-session`.
 • *New*: Integrated **Sequential Thinking MCP** server for structured reasoning workflows during development.
 
 ---
@@ -46,7 +46,7 @@
 app/               core modules
   bot.py           – main event loop
   translator.py    – OpenAI translation helper
-  image_generator.py – DALLE / Stability helper
+  
   article_extractor.py – newspaper4k wrapper
   session_manager.py – database session handling
 scripts/           one-off utilities (auth, export_session)
@@ -65,10 +65,9 @@ Secrets → `.env`; settings → `app_settings.env`.
 Required (excerpt):
 ```
 API_ID, API_HASH, BOT_TOKEN           # Telegram
-OPENAI_API_KEY, ANTHROPIC_API_KEY     # LLMs / images
+ANTHROPIC_API_KEY                     # LLM for translation
 SRC_CHANNEL, DST_CHANNEL              # Channel usernames
-GENERATE_IMAGES=true|false
-USE_STABILITY_AI=true|false
+
 TG_COMPRESSED_SESSION_STRING          # auto-generated
 SUPABASE_URL, SUPABASE_KEY           # Supabase Postgres instance
 EMBED_MODEL                           # optional, default text-embedding-ada-002
@@ -100,7 +99,7 @@ EMBED_MODEL                           # optional, default text-embedding-ada-002
 ## 7. Task Snapshot (abridged)
 ### ✅ Done (MVP)
 - Core bot pipeline with article extraction
-- Translation & image modules
+- Translation modules
 - **Translation Memory** (Supabase + pgvector)
 - **Database-backed sessions** (Supabase)
 - **Analytics system** with comprehensive tracking
@@ -116,8 +115,7 @@ EMBED_MODEL                           # optional, default text-embedding-ada-002
   - **Length optimization**: Maximum 200 words per post (down from 400+ word posts)
 
 ### 🔄 In Progress / Next
-- **Task 19**: Disable image generation temporarily – MEDIUM PRIORITY
-- **Task 13**: Future enhancements framework (image improvements)
+
 - **Task 14**: User documentation 
 - **Task 15**: Final QA before production
 
@@ -130,8 +128,8 @@ EMBED_MODEL                           # optional, default text-embedding-ada-002
 # Export local session to env-string
 python export_session.py --compress > app_settings.env
 
-# Manual batch process last 5 posts without images
-python app/bot.py --process-recent 5 --no-images
+# Manual batch process last 5 posts
+python app/bot.py --process-recent 5
 ```
 
 ---

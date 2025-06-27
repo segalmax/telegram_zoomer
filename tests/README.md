@@ -5,7 +5,7 @@ This directory contains all tests for the Telegram Zoomer Bot project.
 ## Test Files
 
 ### Core Tests
-- **`test_e2e_unified.py`** - End-to-end tests covering the full bot pipeline including translation, image generation, and Telegram integration
+- **`test_e2e_unified.py`** - End-to-end tests covering the full bot pipeline including translation and Telegram integration
 - **`conftest.py`** - Pytest configuration and fixtures
 
 ### Feature Tests  
@@ -34,11 +34,9 @@ python tests/test_integration.py
 
 ### Run Tests with Special Options
 ```bash
-# Run with image generation disabled
-python -m pytest tests/ --no-images
 
-# Run with Stability AI enabled
-python -m pytest tests/ --stability
+
+
 
 # Run in bot mode (requires test channels)
 python -m pytest tests/ --bot-mode
@@ -47,7 +45,7 @@ python -m pytest tests/ --bot-mode
 ## Test Requirements
 
 - **Environment Variables**: Tests require proper `.env` configuration with API keys and test channels
-- **OpenAI API Key**: Required for translation and image generation tests
+- **Anthropic API Key**: Required for translation tests
 - **Telegram Credentials**: Required for end-to-end tests
 - **Test Channels**: `TEST_SRC_CHANNEL` and `TEST_DST_CHANNEL` must be configured
 
@@ -56,7 +54,7 @@ python -m pytest tests/ --bot-mode
 - ✅ Article extraction from ynet.co.il
 - ✅ Error handling for invalid URLs
 - ✅ Translation with enhanced context
-- ✅ Image generation (DALL-E and Stability AI)
+- ✅ Translation functionality (Claude API)
 - ✅ Telegram bot pipeline
 - ✅ Polling mechanism
 - ✅ Integration between components
