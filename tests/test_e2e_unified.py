@@ -33,7 +33,7 @@ import pytest # Added pytest
 # Adjust sys.path if necessary, or install the app as a package
 # For now, direct import if 'app' is discoverable (e.g. via PYTHONPATH or project structure)
 import app.bot
-from app.translator import get_anthropic_client, translate_text
+from app.translator import get_anthropic_client, translate_and_link
 from app.image_generator import generate_image_for_post, generate_image_with_stability_ai
 # Original bot.main is renamed to bot_main_entry for clarity to avoid confusion with this script's previous main
 from app.bot import main as bot_main_entry, translate_and_post as original_bot_translate_and_post
@@ -94,7 +94,8 @@ async def test_api_translations(test_args):
     client = get_anthropic_client(ANTHROPIC_KEY)
     assert client, "Anthropic client could not be initialized. Check ANTHROPIC_API_KEY."
     logger.info("Testing RIGHT-BIDLO style translation...")
-    translation_result = await translate_text(client, TEST_MESSAGE)
+    # Use new semantic linking approach with empty memory for this test
+    translation_result = await translate_and_link(client, TEST_MESSAGE, [])
     assert translation_result and len(translation_result) > 10, "RIGHT-BIDLO translation failed or returned empty/short result"
     logger.info(f"RIGHT-BIDLO translation successful: {translation_result[:100]}...")
 

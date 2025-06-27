@@ -11,7 +11,7 @@ import asyncio
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'app'))
 
 from article_extractor import extract_article
-from translator import get_anthropic_client, translate_text
+from translator import get_anthropic_client, translate_and_link
 
 import pytest
 
@@ -56,7 +56,8 @@ async def test_article_extraction_integration():
         pytest.skip("No Anthropic API key available for translation test")
     
     client = get_anthropic_client(api_key)
-    translated = await translate_text(client, translation_context)
+    # Use new semantic linking approach with empty memory for this test
+    translated = await translate_and_link(client, translation_context, [])
     
     print(f"\n=== Translation Result ===")
     print(f"Translated text length: {len(translated)} characters")

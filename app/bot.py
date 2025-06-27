@@ -17,7 +17,7 @@ from telethon.sessions import StringSession
 from telethon import utils
 import anthropic
 from dotenv import load_dotenv
-from .translator import get_anthropic_client, translate_text, safety_check_translation
+from .translator import get_anthropic_client, translate_and_link, safety_check_translation
 from .image_generator import generate_image_for_post
 from .session_manager import setup_session, load_app_state, save_app_state, save_session_after_auth
 from telethon.tl.functions.account import UpdateStatusRequest
@@ -29,7 +29,7 @@ from .pts_manager import get_pts, update_pts
 from .vector_store import recall as recall_tm, save_pair as store_tm
 from .article_extractor import extract_article
 from .analytics import analytics
-from .linker import add_navigation_links
+# Using translate_and_link for unified semantic linking
 
 # Load environment variables explicitly from project root.
 # Order of loading determines precedence for non-secret variables if keys overlap.
@@ -240,23 +240,19 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
         if TEST_MODE and os.getenv('FAST_TEST_TRANSLATION', '1') == '1':
             # Fast path for unit/integration tests – avoid external API calls
             logger.info("TEST_MODE fast-translation enabled – skipping Anthropic API call")
-            translated_text = f"[TEST] {txt[:200]}"
-            linked_text = add_navigation_links(translated_text, memory, max_phrases=5)
+            linked_text = f"[TEST] {txt[:200]}"
             right_content = f"{linked_text}{source_footer}"
             sent_message = await send_message_parts(dst_channel_to_use, right_content, image_data, image_url_str)
             # Skip saving to TM in fast test mode to reduce Supabase traffic
         else:
             # Always use right-bidlo style (only style supported)
-            logger.info("Translating in RIGHT-BIDLO style...")
+            logger.info("Translating in RIGHT-BIDLO style with semantic linking...")
             translation_start = time.time()
-            translated_text = await translate_text(anthropic_client, translation_context)
+            linked_text = await translate_and_link(anthropic_client, translation_context, memory)
             translation_time_ms = int((time.time() - translation_start) * 1000)
             
-            # Track translation result
-            analytics.set_translation_result(translated_text, translation_time_ms)
-            
-            # Inject navigation links to previous messages (best effort)
-            linked_text = add_navigation_links(translated_text, memory, max_phrases=5)
+            # Track translation result (extract text without links for analytics)
+            analytics.set_translation_result(linked_text, translation_time_ms)
 
             logger.info("Safety check disabled - posting Lurkmore-style translation with navigation links")
             right_content = f"{linked_text}{source_footer}"
@@ -269,7 +265,7 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
             try:
                 pair_id = f"{message_id}-right" if message_id else str(uuid.uuid4())
                 logger.info(f"💾 Saving translation pair to memory: {pair_id}")
-                logger.debug(f"📝 Source length: {len(txt)} chars, Translation length: {len(translated_text)} chars")
+                logger.debug(f"📝 Source length: {len(txt)} chars, Translation length: {len(linked_text)} chars")
                 
                 # Construct destination message URL from the sent message
                 destination_message_url = None
@@ -281,7 +277,7 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
                 
                 store_tm(
                     src=txt,
-                    tgt=translated_text,
+                    tgt=linked_text,
                     pair_id=pair_id,
                     message_id=sent_message.id if sent_message else message_id,
                     channel_name=dst_channel_to_use.replace("@", ""),
