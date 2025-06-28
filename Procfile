@@ -1,2 +1,2 @@
 worker: python -m app.bot
-test-worker: python -m pytest tests/ -v
+test-worker: TEST_MODE=true python -m pytest tests/ -v
