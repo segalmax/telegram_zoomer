@@ -3,4 +3,5 @@ description:
 globs: 
 alwaysApply: true
 ---
-- you must always run all tests in tests finishing a task master task!
+1. you must always run all tests in tests finishing a task master task!
+2. if you discover or change something in code - you must update the relevant doc immediately.

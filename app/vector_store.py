@@ -12,17 +12,8 @@ import time
 import uuid
 from typing import List, Dict, Any
 
-try:
-    from supabase import create_client, Client  # type: ignore
-except ImportError:  # pragma: no cover
-    # Supabase optional – we still want the bot to run if dependency missing during tests.
-    create_client = None  # type: ignore
-    Client = Any  # type: ignore
-
-try:
-    import openai  # type: ignore
-except ImportError:  # pragma: no cover
-    openai = None  # type: ignore
+from supabase import create_client, Client  # type: ignore
+import openai  # type: ignore
 
 logger = logging.getLogger(__name__)
 
@@ -32,51 +23,42 @@ logger = logging.getLogger(__name__)
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 OPENAI_KEY = os.getenv("OPENAI_API_KEY")
-openai_api_ready = openai is not None and OPENAI_KEY is not None
-_openai_client = None
-if openai_api_ready:
-    _openai_client = openai.OpenAI(api_key=OPENAI_KEY)  # type: ignore
+assert OPENAI_KEY, "OPENAI_API_KEY environment variable is required"
+_openai_client = openai.OpenAI(api_key=OPENAI_KEY)
 
 EMBED_MODEL = os.getenv("EMBED_MODEL", "text-embedding-ada-002")
 
 # ---------------------------------------------------------------------------
-# Supabase client (optional)
+# Supabase client (REQUIRED)
 # ---------------------------------------------------------------------------
-_sb: Client | None = None
-if create_client and SUPABASE_URL and SUPABASE_KEY:
+assert SUPABASE_URL, "SUPABASE_URL environment variable is required"
+assert SUPABASE_KEY, "SUPABASE_KEY environment variable is required"
+
+try:
+    # Try creating client without any extra options first
+    _sb = create_client(SUPABASE_URL, SUPABASE_KEY)
+    logger.info("Supabase vector store enabled")
+except TypeError as e:
+    # Handle proxy parameter issue in older versions
     try:
-        # Try creating client without any extra options first
-        _sb = create_client(SUPABASE_URL, SUPABASE_KEY)  # type: ignore
-        logger.info("Supabase vector store enabled")
-    except TypeError as e:
-        # Handle proxy parameter issue in older versions
-        try:
-            import inspect
-            sig = inspect.signature(create_client)
-            if 'options' in sig.parameters:
-                _sb = create_client(SUPABASE_URL, SUPABASE_KEY, options={})  # type: ignore
-            else:
-                _sb = create_client(SUPABASE_URL, SUPABASE_KEY)  # type: ignore
-            logger.info("Supabase vector store enabled (fallback)")
-        except Exception as e2:
-            logger.warning(f"Unable to create Supabase client – vector store disabled: {e2}")
-            _sb = None
-    except Exception as e:  # pragma: no cover
-        logger.warning(f"Unable to create Supabase client – vector store disabled: {e}")
-        _sb = None
-else:
-    logger.info("Supabase vector store disabled – missing env or dependency")
-    logger.warning("Supabase vector store disabled – missing env vars or supabase library; running without TM")
+        import inspect
+        sig = inspect.signature(create_client)
+        if 'options' in sig.parameters:
+            _sb = create_client(SUPABASE_URL, SUPABASE_KEY, options={})
+        else:
+            _sb = create_client(SUPABASE_URL, SUPABASE_KEY)
+        logger.info("Supabase vector store enabled (fallback)")
+    except Exception as e2:
+        raise RuntimeError(f"Failed to create Supabase client even with fallback: {e2}") from e2
+except Exception as e:
+    raise RuntimeError(f"Failed to create Supabase client: {e}") from e
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 def _embed(text: str) -> List[float]:
-    """Return embedding vector using OpenAI embeddings. Falls back to empty list if not available."""
-    if not openai_api_ready or _openai_client is None:
-        logger.debug("OpenAI not configured; returning zero vector")
-        return []
+    """Return embedding vector using OpenAI embeddings. Fails if OpenAI unavailable."""
     try:
         response = _openai_client.embeddings.create(
             model=EMBED_MODEL,
@@ -85,8 +67,7 @@ def _embed(text: str) -> List[float]:
         )
         return response.data[0].embedding
     except Exception as e:
-        logger.error(f"Embedding generation failed: {e}")
-        return []
+        raise RuntimeError(f"Embedding generation failed: {e}") from e
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -100,13 +81,9 @@ def save_pair(
     channel_name: str | None = None,
     message_url: str | None = None
 ) -> None:
-    """Upsert one (source, translation) pair into Supabase. No-op if store unavailable."""
-    if _sb is None:
-        logger.debug("💾 Supabase client not available, skipping save_pair")
-        return
-    if not src or not tgt:
-        logger.warning(f"💾 Empty source or target text, skipping save_pair: src={bool(src)}, tgt={bool(tgt)}")
-        return
+    """Upsert one (source, translation) pair into Supabase. Fails if store unavailable or invalid input."""
+    assert src, "Source text is required for save_pair"
+    assert tgt, "Target text is required for save_pair"
     
     pair_id = pair_id or str(uuid.uuid4())
     logger.debug(f"💾 Starting save_pair: id={pair_id}, src_len={len(src)}, tgt_len={len(tgt)}, message_id={message_id}, url={message_url}")
@@ -116,18 +93,14 @@ def save_pair(
         embed_start = time.time()
         vec = _embed(src)
         embed_time = time.time() - embed_start
-        
-        if vec:
-            logger.debug(f"🔢 Generated embedding in {embed_time:.3f}s: {len(vec)} dimensions")
-        else:
-            logger.warning(f"🔢 Failed to generate embedding in {embed_time:.3f}s")
+        logger.debug(f"🔢 Generated embedding in {embed_time:.3f}s: {len(vec)} dimensions")
         
         # Prepare data
         data = {
             "id": pair_id,
             "source_text": src,
             "translation_text": tgt,
-            "embedding": vec if vec else None,
+            "embedding": vec,
             "created_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
         }
         
@@ -152,13 +125,8 @@ def save_pair(
 
 
 def recall(src: str, k: int = 10) -> List[Dict[str, Any]]:
-    """Return ≤k most relevant past pairs. Empty list if store unavailable or error."""
-    if _sb is None:
-        logger.debug("🧠 Supabase client not available, returning empty recall")
-        return []
-    if not src:
-        logger.warning("🧠 Empty source text provided to recall")
-        return []
+    """Return ≤k most relevant past pairs. Fails if store unavailable or invalid input."""
+    assert src, "Source text is required for recall"
     
     logger.debug(f"🧠 Starting recall: k={k}, src_len={len(src)}")
     
@@ -167,11 +135,6 @@ def recall(src: str, k: int = 10) -> List[Dict[str, Any]]:
         embed_start = time.time()
         vec = _embed(src)
         embed_time = time.time() - embed_start
-        
-        if not vec:
-            logger.warning(f"🧠 Failed to generate query embedding in {embed_time:.3f}s")
-            return []
-        
         logger.debug(f"🔢 Generated query embedding in {embed_time:.3f}s: {len(vec)} dimensions")
         
         # Query database
@@ -229,5 +192,4 @@ def recall(src: str, k: int = 10) -> List[Dict[str, Any]]:
         return results
         
     except Exception as e:
-        logger.error(f"💥 vector_store.recall failed: {e}", exc_info=True)
-        return [] 
+        raise RuntimeError(f"Vector store recall failed: {e}") from e 

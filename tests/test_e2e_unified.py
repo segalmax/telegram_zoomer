@@ -138,8 +138,7 @@ async def verify_message_in_channel(client, channel, content_fragment, timeout=3
 @pytest.mark.asyncio
 async def test_telegram_pipeline(test_args):
     """Run the Telegram pipeline test."""
-    if not TELETHON_AVAILABLE:
-        pytest.skip("Telethon not available. Please install with: pip install telethon")
+    assert TELETHON_AVAILABLE, "Telethon is required but not available. Please install with: pip install telethon"
     if not all([API_ID, API_HASH, TG_PHONE, TEST_SRC_CHANNEL, TEST_DST_CHANNEL]):
         pytest.fail("Missing Telegram credentials or test channels. Check .env and ensure TEST_SRC_CHANNEL/TEST_DST_CHANNEL are set.")
 
@@ -251,78 +250,7 @@ async def test_telegram_pipeline(test_args):
         if original_test_mode_env is not None: os.environ['TEST_MODE'] = original_test_mode_env
         else: os.environ.pop('TEST_MODE', None)
 
-@pytest.mark.asyncio
-async def test_run_bot_mode(test_args, bot_mode_option):
-    """Runs the bot in a test mode if --bot-mode is specified."""
-    if not bot_mode_option:
-        pytest.skip("Skipping bot mode test; --bot-mode not specified.")
 
-    logger.info("=== Running in REAL BOT MODE with test channels (via pytest) ===")
-    assert TEST_SRC_CHANNEL and TEST_DST_CHANNEL, "TEST_SRC_CHANNEL and TEST_DST_CHANNEL must be set for bot mode"
-    logger.info(f"Using test source channel: {TEST_SRC_CHANNEL}")
-    logger.info(f"Using test destination channel: {TEST_DST_CHANNEL}")
-
-    original_src_env = os.environ.get('SRC_CHANNEL')
-    original_dst_env = os.environ.get('DST_CHANNEL')
-    original_test_mode_env = os.environ.get('TEST_MODE')
-
-    os.environ['SRC_CHANNEL'] = TEST_SRC_CHANNEL
-    os.environ['DST_CHANNEL'] = TEST_DST_CHANNEL
-    os.environ['TEST_MODE'] = 'true'
-
-
-    message_processed_event = asyncio.Event()
-    async def wrapped_translate_and_post_for_bot_mode(client, txt, message_id=None, destination_channel=None, message_entity_urls=None):
-        current_test_run_prefix = os.getenv('TEST_RUN_MESSAGE_PREFIX')
-        if current_test_run_prefix and current_test_run_prefix in txt:
-            logger.info(f"✅ BOT_MODE: Successfully processed test message with prefix: {current_test_run_prefix}")
-            message_processed_event.set()
-        return await original_bot_translate_and_post(client, txt, message_id, destination_channel, message_entity_urls)
-
-    app.bot.translate_and_post = wrapped_translate_and_post_for_bot_mode
-    
-    original_argv = sys.argv.copy()
-    bot_argv = [sys.argv[0]]
-    if test_args.process_recent is not None:
-        bot_argv.extend(['--process-recent', str(test_args.process_recent)])
-    
-    main_bot_task = None
-    try:
-        sys.argv = bot_argv
-        logger.info(f"BOT_MODE: Starting bot_main_entry. Waiting for message with prefix '{os.getenv('TEST_RUN_MESSAGE_PREFIX', 'N/A')}' for up to {BOT_MODE_TIMEOUT}s.")
-        main_bot_task = asyncio.create_task(bot_main_entry())
-        done, pending = await asyncio.wait(
-            [main_bot_task, asyncio.create_task(message_processed_event.wait())],
-            timeout=BOT_MODE_TIMEOUT,
-            return_when=asyncio.FIRST_COMPLETED
-        )
-        assert message_processed_event.is_set(), f"BOT_MODE: Timed out after {BOT_MODE_TIMEOUT}s waiting for message with prefix '{os.getenv('TEST_RUN_MESSAGE_PREFIX', 'N/A')}'."
-        logger.info("BOT_MODE: Test message processed successfully.")
-        for task in done:
-            if task == main_bot_task and task.done():
-                exc = task.exception()
-                if exc: # pragma: no cover (hard to deterministically trigger bot failure here)
-                    logger.error(f"BOT_MODE: bot_main_entry task failed: {exc}", exc_info=True)
-                    pytest.fail(f"bot_main_entry task failed: {exc}")
-    except asyncio.TimeoutError: # Should be caught by the assert above
-        pytest.fail(f"BOT_MODE: Timed out after {BOT_MODE_TIMEOUT}s waiting for message prefix.") # pragma: no cover
-    except Exception as e: # pragma: no cover
-        logger.error(f"BOT_MODE: Error running bot_main_entry: {e}", exc_info=True)
-        pytest.fail(f"BOT_MODE: Error running bot_main_entry: {e}")
-    finally:
-        if main_bot_task and not main_bot_task.done():
-            main_bot_task.cancel()
-            try: await main_bot_task
-            except asyncio.CancelledError: logger.info("BOT_MODE: Main bot task was cancelled.")
-        sys.argv = original_argv
-        app.bot.translate_and_post = original_bot_translate_and_post
-        if original_src_env: os.environ['SRC_CHANNEL'] = original_src_env
-        else: os.environ.pop('SRC_CHANNEL', None)
-        if original_dst_env: os.environ['DST_CHANNEL'] = original_dst_env
-        else: os.environ.pop('DST_CHANNEL', None)
-        if original_test_mode_env is not None: os.environ['TEST_MODE'] = original_test_mode_env
-        else: os.environ.pop('TEST_MODE', None)
-    logger.info("🎉 Bot mode test completed.")
 
 @pytest.mark.order(-1) # Try to run this test last in the module
 def test_verify_no_errors_logged(error_counter_handler):

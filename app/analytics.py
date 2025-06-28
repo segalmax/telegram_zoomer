@@ -13,11 +13,7 @@ from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, asdict
 from datetime import datetime
 
-try:
-    from supabase import create_client, Client  # type: ignore
-except ImportError:  # pragma: no cover
-    create_client = None  # type: ignore
-    Client = Any  # type: ignore
+from supabase import create_client, Client  # type: ignore
 
 logger = logging.getLogger(__name__)
 
@@ -25,14 +21,14 @@ logger = logging.getLogger(__name__)
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
-_analytics_client: Client | None = None
-if create_client and SUPABASE_URL and SUPABASE_KEY:
-    try:
-        _analytics_client = create_client(SUPABASE_URL, SUPABASE_KEY)  # type: ignore
-        logger.info("Analytics client initialized")
-    except Exception as e:
-        logger.warning(f"Analytics client initialization failed: {e}")
-        _analytics_client = None
+assert SUPABASE_URL, "SUPABASE_URL environment variable is required for analytics"
+assert SUPABASE_KEY, "SUPABASE_KEY environment variable is required for analytics"
+
+try:
+    _analytics_client = create_client(SUPABASE_URL, SUPABASE_KEY)
+    logger.info("Analytics client initialized")
+except Exception as e:
+    raise RuntimeError(f"Analytics client initialization failed: {e}") from e
 
 @dataclass
 class TranslationSession:
@@ -170,7 +166,7 @@ class AnalyticsTracker:
     
     def track_memory_usage(self, session_id: str, memories: List[Dict[str, Any]]):
         """Track individual memory usage for analysis"""
-        if not _analytics_client or not memories:
+        if not memories:
             return
         
         # Only track memory usage if we have a current session (ensures session exists in DB)
@@ -199,9 +195,6 @@ class AnalyticsTracker:
     
     def _save_session_to_db(self, session: TranslationSession):
         """Save session to database"""
-        if not _analytics_client:
-            logger.debug("📊 Analytics client not available, skipping session save")
-            return
         
         try:
             session_data = asdict(session)
@@ -232,8 +225,6 @@ analytics = AnalyticsTracker()
 
 def get_analytics_summary(days: int = 7) -> Dict[str, Any]:
     """Get analytics summary for the last N days"""
-    if not _analytics_client:
-        return {"error": "Analytics client not available"}
     
     try:
         # Get session statistics

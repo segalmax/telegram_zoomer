@@ -209,76 +209,61 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
                 translation_context += f"\n\nNote: This message contains a link: {message_entity_urls[0]}"
                 logger.info("Article extraction failed, using fallback link mention")
         
-        if TEST_MODE and os.getenv('FAST_TEST_TRANSLATION', '1') == '1':
-            # Fast path for unit/integration tests – avoid external API calls
-            logger.info("TEST_MODE fast-translation enabled – skipping Anthropic API call")
-            linked_text = f"[TEST] {txt[:200]}"
-            
-            # Add invisible article link at the beginning for proper Telegram thumbnail
-            invisible_article_link = ""
-            if message_entity_urls and len(message_entity_urls) > 0:
-                invisible_article_link = f"[\u200B]({message_entity_urls[0]})"
-                logger.info(f"Added invisible article link for thumbnail: {message_entity_urls[0]}")
-            
-            right_content = f"{invisible_article_link}{linked_text}{source_footer}"
-            sent_message = await send_message_parts(dst_channel_to_use, right_content)
-            # Skip saving to TM in fast test mode to reduce Supabase traffic
-        else:
-            # Always use right-bidlo style (only style supported)
-            logger.info("Translating in RIGHT-BIDLO style with semantic linking...")
-            translation_start = time.time()
-            linked_text = await translate_and_link(anthropic_client, translation_context, memory)
-            translation_time_ms = int((time.time() - translation_start) * 1000)
-            
-            # Track translation result (extract text without links for analytics)
-            analytics.set_translation_result(linked_text, translation_time_ms)
+        # Always use right-bidlo style (only style supported)
+        logger.info("Translating in RIGHT-BIDLO style with semantic linking...")
+        translation_start = time.time()
+        linked_text = await translate_and_link(anthropic_client, translation_context, memory)
+        translation_time_ms = int((time.time() - translation_start) * 1000)
+        
+        # Track translation result (extract text without links for analytics)
+        analytics.set_translation_result(linked_text, translation_time_ms)
 
-            logger.info("Safety check disabled - posting Lurkmore-style translation with navigation links")
+        logger.info("Safety check disabled - posting Lurkmore-style translation with navigation links")
+        
+        # Add invisible article link at the beginning for proper Telegram thumbnail
+        invisible_article_link = ""
+        if message_entity_urls and len(message_entity_urls) > 0:
+            invisible_article_link = f"[\u200B]({message_entity_urls[0]})"
+            logger.info(f"Added invisible article link for thumbnail: {message_entity_urls[0]}")
+        
+        right_content = f"{invisible_article_link}{linked_text}{source_footer}"
+        logger.info(f"📝 Final post content preview: {right_content[:200]}...")
+        sent_message = await send_message_parts(dst_channel_to_use, right_content)
+        logger.info(f"Posted right-bidlo version")
+        
+        # Persist pair in translation memory (best-effort) 
+        save_start_time = time.time()
+        try:
+            pair_id = f"{message_id}-right" if message_id else str(uuid.uuid4())
+            logger.info(f"💾 Saving translation pair to memory: {pair_id}")
+            logger.debug(f"📝 Source length: {len(txt)} chars, Translation length: {len(linked_text)} chars")
             
-            # Add invisible article link at the beginning for proper Telegram thumbnail
-            invisible_article_link = ""
-            if message_entity_urls and len(message_entity_urls) > 0:
-                invisible_article_link = f"[\u200B]({message_entity_urls[0]})"
-                logger.info(f"Added invisible article link for thumbnail: {message_entity_urls[0]}")
+            # Construct destination message URL from the sent message
+            destination_message_url = None
+            if sent_message and hasattr(sent_message, 'id'):
+                # Remove @ from channel name and construct t.me URL
+                dest_channel_clean = dst_channel_to_use.replace("@", "")
+                destination_message_url = f"https://t.me/{dest_channel_clean}/{sent_message.id}"
+                logger.info(f"🔗 Constructed destination URL: {destination_message_url}")
             
-            right_content = f"{invisible_article_link}{linked_text}{source_footer}"
-            logger.info(f"📝 Final post content preview: {right_content[:200]}...")
-            sent_message = await send_message_parts(dst_channel_to_use, right_content)
-            logger.info(f"Posted right-bidlo version")
+            store_tm(
+                src=txt,
+                tgt=linked_text,
+                pair_id=pair_id,
+                message_id=sent_message.id if sent_message else message_id,
+                channel_name=dst_channel_to_use.replace("@", ""),
+                message_url=destination_message_url,
+            )
+            save_time = time.time() - save_start_time
+            logger.info(f"✅ Translation pair saved successfully in {save_time:.3f}s: {pair_id}")
             
-            # Persist pair in translation memory (best-effort) 
-            save_start_time = time.time()
-            try:
-                pair_id = f"{message_id}-right" if message_id else str(uuid.uuid4())
-                logger.info(f"💾 Saving translation pair to memory: {pair_id}")
-                logger.debug(f"📝 Source length: {len(txt)} chars, Translation length: {len(linked_text)} chars")
-                
-                # Construct destination message URL from the sent message
-                destination_message_url = None
-                if sent_message and hasattr(sent_message, 'id'):
-                    # Remove @ from channel name and construct t.me URL
-                    dest_channel_clean = dst_channel_to_use.replace("@", "")
-                    destination_message_url = f"https://t.me/{dest_channel_clean}/{sent_message.id}"
-                    logger.info(f"🔗 Constructed destination URL: {destination_message_url}")
-                
-                store_tm(
-                    src=txt,
-                    tgt=linked_text,
-                    pair_id=pair_id,
-                    message_id=sent_message.id if sent_message else message_id,
-                    channel_name=dst_channel_to_use.replace("@", ""),
-                    message_url=destination_message_url,
-                )
-                save_time = time.time() - save_start_time
-                logger.info(f"✅ Translation pair saved successfully in {save_time:.3f}s: {pair_id}")
-                
-                # Track save time in analytics
-                analytics.set_memory_save_time(int(save_time * 1000))
-                
-            except Exception as e:
-                save_time = time.time() - save_start_time
-                logger.error(f"💥 TM save failed for {pair_id} after {save_time:.3f}s: {e}", exc_info=True)
-                analytics.set_error(f"Memory save failed: {e}")
+            # Track save time in analytics
+            analytics.set_memory_save_time(int(save_time * 1000))
+            
+        except Exception as e:
+            save_time = time.time() - save_start_time
+            logger.error(f"💥 TM save failed for {pair_id} after {save_time:.3f}s: {e}", exc_info=True)
+            analytics.set_error(f"Memory save failed: {e}")
         
         logger.info(f"Total processing time for message: {time.time() - start_time:.2f} seconds")
         
@@ -354,7 +339,7 @@ async def process_recent_posts(client_instance, limit=10, timeout=300):
             logger.error(f"Timed out fetching messages from '{SRC_CHANNEL}'")
             return 0
         
-        if not messages: logger.warning(f"No messages found in '{SRC_CHANNEL}'"); return 0
+        assert messages, f"No messages found in '{SRC_CHANNEL}' - this indicates a configuration or access problem"
         
         processed_count = 0
         for msg in reversed(messages):

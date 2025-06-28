@@ -28,11 +28,9 @@ class DatabaseSession:
         self.supabase_url = os.environ.get('SUPABASE_URL')
         self.supabase_key = os.environ.get('SUPABASE_KEY')
         
-        if not self.supabase_url or not self.supabase_key:
-            logger.warning("Supabase credentials not found, falling back to file-based sessions")
-            self.use_database = False
-        else:
-            self.use_database = True
+        assert self.supabase_url, "SUPABASE_URL environment variable is required for session management"
+        assert self.supabase_key, "SUPABASE_KEY environment variable is required for session management"
+        self.use_database = True
     
     def save_session(self, session_string):
         """Save session string to database"""

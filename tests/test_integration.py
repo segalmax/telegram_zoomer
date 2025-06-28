@@ -48,26 +48,67 @@ async def test_article_extraction_integration():
     assert test_url in translation_context, "Context should include the URL"
     assert article_text in translation_context, "Context should include article text"
     
-    # Test translation (requires Anthropic API key)
+    # Test translation with semantic linking (requires Anthropic API key)
     api_key = os.getenv('ANTHROPIC_API_KEY')
-    if not api_key:
-        print("⚠️  No ANTHROPIC_API_KEY found, skipping translation test")
-        print("✅ Integration structure looks correct!")
-        pytest.skip("No Anthropic API key available for translation test")
+    assert api_key, "ANTHROPIC_API_KEY environment variable is required for semantic linking test"
     
-    client = get_anthropic_client(api_key)
-    # Use new semantic linking approach with empty memory for this test
-    translated = await translate_and_link(client, translation_context, [])
+    # Insert test memories with embeddings for linking test
+    from app.vector_store import save_pair, _embed
+    import uuid
     
-    print(f"\n=== Translation Result ===")
-    print(f"Translated text length: {len(translated)} characters")
-    print(f"Translation: {translated}")
-    
-    # Assert translation works
-    assert translated, "Translation should return content"
-    assert len(translated) > 100, "Translation should be substantial"
-    
-    print("\n✅ Integration test successful!")
+    test_memories = []
+    test_ids = []
+    try:
+        # Create 3 test memory entries that should be linked (AI/education themed to match content)
+        test_data = [
+            ("Artificial intelligence transforms education systems", "Искусственный интеллект преобразует образовательные системы", "https://t.me/test/100"),
+            ("Students use AI tutors for personalized learning", "Студенты используют ИИ-репетиторов для персонализированного обучения", "https://t.me/test/101"),  
+            ("Teachers adapt to digital technology in classrooms", "Учителя адаптируются к цифровым технологиям в классах", "https://t.me/test/102")
+        ]
+        
+        for src, tgt, url in test_data:
+            test_id = f"test-{uuid.uuid4()}"
+            test_ids.append(test_id)
+            save_pair(src, tgt, test_id, message_url=url)
+            
+            # Build memory entry like bot does
+            embedding = _embed(src)
+            test_memories.append({
+                'id': test_id,
+                'translation_text': tgt,
+                'message_url': url,
+                'similarity': 0.9  # High similarity to ensure linking
+            })
+        
+        client = get_anthropic_client(api_key)
+        # Test with memories that should trigger semantic links
+        translated = await translate_and_link(client, translation_context, test_memories)
+        
+        print(f"\n=== Translation with Linking Result ===")
+        print(f"Translated text length: {len(translated)} characters")
+        print(f"Translation: {translated}")
+        
+        # Assert translation works
+        assert translated, "Translation should return content"
+        assert len(translated) > 100, "Translation should be substantial"
+        
+        # CRITICAL TEST: Check for semantic links to previous messages
+        import re
+        links = re.findall(r'\[([^\]]+)\]\((https://t\.me/[^\)]+)\)', translated)
+        assert len(links) >= 2, f"Expected at least 2 semantic links to previous messages, found {len(links)}: {links}"
+        
+        print(f"✅ Found {len(links)} semantic links: {links}")
+        print("\n✅ Integration with semantic linking test successful!")
+        
+    finally:
+        # Cleanup test data
+        from app.vector_store import _sb
+        if _sb and test_ids:
+            for test_id in test_ids:
+                try:
+                    _sb.table("article_chunks").delete().eq("id", test_id).execute()
+                except Exception as e:
+                    print(f"Cleanup warning: {e}")
 
 if __name__ == "__main__":
     asyncio.run(test_article_extraction_integration())
