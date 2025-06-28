@@ -1,2 +1,2 @@
 worker: python -m app.bot
-test-worker: python test.py --bot-mode
+test-worker: python -m pytest tests/ -v

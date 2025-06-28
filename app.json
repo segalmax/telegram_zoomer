@@ -3,12 +3,24 @@
   "description": "A bot that translates posts from one Telegram channel to another in zoomer slang",
   "repository": "https://github.com/yourusername/nyt-zoomer-bot",
   "scripts": {
+    "test": "python -m pytest tests/ -v",
     "postdeploy": "python -m app.bot"
   },
   "formation": {
     "worker": {
       "quantity": 1,
       "size": "basic"
+    },
+    "test-worker": {
+      "quantity": 0,
+      "size": "basic"
+    }
+  },
+  "environments": {
+    "test": {
+      "scripts": {
+        "test": "python -m pytest tests/ -v"
+      }
     }
   },
   "buildpacks": [
