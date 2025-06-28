@@ -57,7 +57,7 @@ python-3.10.12
 
 ### No Local Storage
 - **Sessions** → Compressed in Supabase database
-- **PTS state** → Persisted in `app_state` table
+
 - **Translation memory** → Vector embeddings in database
 - **Analytics** → All metrics in database
 

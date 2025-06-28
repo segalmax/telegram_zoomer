@@ -36,7 +36,7 @@ from app.translator import get_anthropic_client, translate_and_link
 
 # Original bot.main is renamed to bot_main_entry for clarity to avoid confusion with this script's previous main
 from app.bot import main as bot_main_entry, translate_and_post as original_bot_translate_and_post
-from app.pts_manager import load_pts, save_pts
+
 
 # Try to import Telegram if needed
 try:

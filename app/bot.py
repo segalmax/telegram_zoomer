@@ -25,7 +25,7 @@ from telethon.errors import SessionPasswordNeededError
 from datetime import datetime, timedelta
 import random
 import argparse
-from .pts_manager import get_pts, update_pts
+
 from .vector_store import recall as recall_tm, save_pair as store_tm
 from .article_extractor import extract_article
 from .analytics import analytics
@@ -334,8 +334,6 @@ async def setup_event_handlers(client_instance):
                 current_state = load_app_state()
                 current_state['message_id'] = event.message.id
                 current_state['timestamp'] = event.message.date.isoformat() # Ensure ISO format
-                # PTS is not directly available here, rely on GetChannelDifference for PTS updates
-                # If this handler is primary, might need a way to estimate or fetch PTS if critical
                 save_app_state(current_state)
                 logger.info(f"App state updated after processing new message ID {event.message.id}")
         except Exception as e:

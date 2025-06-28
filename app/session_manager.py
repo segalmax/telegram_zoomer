@@ -1,7 +1,7 @@
 """
 Database-backed session manager for Telegram client sessions
 
-Stores sessions and app state (including PTS) in Supabase database for persistence across Heroku deployments.
+Stores sessions and app state in Supabase database for persistence across Heroku deployments.
 - Local development: Uses database with 'local' environment tag
 - Heroku production: Uses database with 'production' environment tag  
 - Tests: Uses database with 'test' environment tag
@@ -168,7 +168,6 @@ def load_app_state():
                         state_data["timestamp"] = datetime.fromisoformat(state_data["timestamp"])
                     
                     logger.info(f"Loaded app state from Supabase database (environment: {environment})")
-                    logger.info(f"App state PTS: {state_data.get('pts', 0)}")
                     return state_data
                 else:
                     logger.info(f"No app state found in database for environment: {environment}")
@@ -182,7 +181,6 @@ def load_app_state():
     state_data = {
         "message_id": 0,
         "timestamp": datetime.now() - timedelta(minutes=5),
-        "pts": 0,
         "channel_id": None,
         "updated_at": datetime.now().isoformat(),
         "environment": environment
@@ -206,8 +204,6 @@ def save_app_state(state_data):
     # Convert datetime to ISO string for JSON serialization
     if isinstance(state_to_save.get("timestamp"), datetime):
         state_to_save["timestamp"] = state_to_save["timestamp"].isoformat()
-    
-    state_to_save["pts"] = int(state_to_save.get("pts", 0))
 
     # Save to database first
     supabase_url = os.environ.get('SUPABASE_URL')
@@ -235,7 +231,7 @@ def save_app_state(state_data):
             )
             
             if response.status_code in [200, 201, 204]:
-                logger.info(f"Saved app state to database (environment: {environment}, PTS: {state_to_save['pts']})")
+                logger.info(f"Saved app state to database (environment: {environment})")
                 database_success = True
             else:
                 logger.error(f"Failed to save app state to database: {response.status_code} {response.text}")
@@ -323,42 +319,4 @@ def save_session_after_auth(client, session_name=None, environment=None):
     except Exception as e:
         logger.error(f"Error saving session after auth: {e}")
 
-def reset_pts(environment=None):
-    """
-    Reset PTS to 0 for graceful recovery from PersistentTimestampEmptyError.
-    This forces the bot to start fresh with channel polling.
-    
-    Args:
-        environment: Specific environment to reset, or None for current environment
-    """
-    if environment is None:
-        environment = _get_environment()
-    
-    logger.warning(f"Resetting PTS to 0 for environment: {environment}")
-    
-    # Load current state
-    current_state = load_app_state()
-    
-    # Reset PTS and update timestamp
-    current_state['pts'] = 0
-    current_state['message_id'] = 0
-    current_state['timestamp'] = datetime.now() - timedelta(minutes=5)
-    
-    # Save updated state
-    save_app_state(current_state)
-    
-    logger.info(f"PTS reset complete for environment: {environment}")
-
-def get_pts_info():
-    """Get current PTS information for debugging"""
-    environment = _get_environment()
-    state = load_app_state()
-    
-    return {
-        'environment': environment,
-        'pts': state.get('pts', 0),
-        'message_id': state.get('message_id', 0),
-        'timestamp': state.get('timestamp'),
-        'updated_at': state.get('updated_at'),
-        'has_supabase': bool(os.environ.get('SUPABASE_URL') and os.environ.get('SUPABASE_KEY'))
-    } 
+ 

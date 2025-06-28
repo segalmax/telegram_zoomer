@@ -63,24 +63,7 @@ graph LR
 - **Language detection** → Hebrew/English auto-detection
 - **Fallback** → Process message text if no URL
 
-## 🔐 PTS (Persistent Timestamp) Management
 
-### Problem Solved
-- Telegram PTS tracks message state
-- Local storage → lost on Heroku restart → duplicate processing
-- **Solution** → PTS stored in Supabase database
-
-### PTS Strategy
-```python
-# Load PTS from database
-pts = get_pts(environment)
-
-# Process messages from last known state
-client.start(pts=pts)
-
-# Save updated PTS after processing
-update_pts(new_pts, environment)
-```
 
 ## ⚡ Performance Optimizations
 
@@ -113,7 +96,7 @@ DST_CHANNEL=@destination_channel      # Destination for translations
 
 ### Critical Scenarios
 - **AuthKeyDuplicatedError** → Use separate test sessions
-- **PersistentTimestampEmptyError** → Auto-reset PTS
+
 - **Network interruptions** → Automatic reconnection
 - **Flood limits** → Respect Telegram rate limits
 

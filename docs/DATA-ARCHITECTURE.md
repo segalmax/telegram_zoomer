@@ -32,7 +32,7 @@ erDiagram
     
     app_state {
         varchar environment PK
-        int pts
+        
         timestamp updated_at
     }
 ```
@@ -43,7 +43,7 @@ erDiagram
 |-------|---------|-------------|
 | `telegram_sessions` | Session persistence | Compressed storage |
 | `article_chunks` | Translation memory | pgvector embeddings |
-| `app_state` | PTS tracking | Environment isolation |
+| `app_state` | State tracking | Environment isolation |
 | `translation_sessions` | Analytics | Performance metrics |
 
 ## 🧠 Vector Storage Architecture
