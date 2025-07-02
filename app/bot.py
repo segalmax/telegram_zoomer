@@ -19,7 +19,7 @@ import anthropic
 from dotenv import load_dotenv
 from .translator import get_anthropic_client, translate_and_link, safety_check_translation
 
-from .session_manager import setup_session, load_app_state, save_app_state, save_session_after_auth
+from .session_manager import setup_session, save_session_after_auth
 from telethon.tl.functions.account import UpdateStatusRequest
 from telethon.errors import SessionPasswordNeededError
 from datetime import datetime, timedelta
@@ -316,11 +316,7 @@ async def setup_event_handlers(client_instance):
             
             sent_message = await translate_and_post(client_instance, txt, event.message.id, message_entity_urls=message_entity_urls)
             if sent_message:
-                current_state = load_app_state()
-                current_state['message_id'] = event.message.id
-                current_state['timestamp'] = event.message.date.isoformat() # Ensure ISO format
-                save_app_state(current_state)
-                logger.info(f"App state updated after processing new message ID {event.message.id}")
+                logger.info(f"Successfully processed and posted message ID {event.message.id}")
         except Exception as e:
             logger.error(f"Error in handle_new_message: {str(e)}", exc_info=True)
 

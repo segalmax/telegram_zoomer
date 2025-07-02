@@ -55,7 +55,6 @@ import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
-from app.session_manager import load_app_state, save_app_state
 
 # Unique prefix for each run (stay below 20 chars to keep test messages short)
 MESSAGE_PREFIX = f"POLLING-TEST-{uuid.uuid4().hex[:6]}"

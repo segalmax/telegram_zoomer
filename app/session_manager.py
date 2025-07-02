@@ -1,12 +1,12 @@
 """
 Database-backed session manager for Telegram client sessions
 
-Stores sessions and app state in Supabase database for persistence across Heroku deployments.
+Stores sessions in Supabase database for persistence across Heroku deployments.
 - Local development: Uses database with 'local' environment tag
 - Heroku production: Uses database with 'production' environment tag  
 - Tests: Uses database with 'test' environment tag
 
-No file-based sessions or state, everything in database for true persistence.
+No file-based sessions, everything in database for true persistence.
 """
 
 import os
@@ -130,115 +130,7 @@ def _get_environment():
     else:
         return "local"
 
-def load_app_state():
-    """Load the application state from Supabase database (no filesystem fallback)."""
-    environment = _get_environment()
-    
-    # Try to load from database first
-    supabase_url = os.environ.get('SUPABASE_URL')
-    supabase_key = os.environ.get('SUPABASE_KEY')
-    
-    if supabase_url and supabase_key:
-        try:
-            import httpx
-            
-            headers = {
-                'apikey': supabase_key,
-                'Authorization': f'Bearer {supabase_key}'
-            }
-            
-            response = httpx.get(
-                f"{supabase_url}/rest/v1/app_state",
-                headers=headers,
-                params={
-                    'environment': f'eq.{environment}',
-                    'select': '*',
-                    'limit': '1'
-                }
-            )
-            
-            if response.status_code == 200:
-                data = response.json()
-                if data:
-                    state_data = data[0]
-                    # Convert timestamp string to datetime object
-                    if isinstance(state_data.get("timestamp"), str):
-                        state_data["timestamp"] = datetime.fromisoformat(state_data["timestamp"])
-                    
-                    logger.info(f"Loaded app state from Supabase database (environment: {environment})")
-                    return state_data
-                else:
-                    logger.info(f"No app state found in database for environment: {environment}")
-            else:
-                logger.warning(f"Failed to load app state from database: {response.status_code}")
-                
-        except Exception as e:
-            logger.error(f"Error loading app state from database: {e}")
-    
-    # Default state if database unavailable
-    state_data = {
-        "message_id": 0,
-        "timestamp": datetime.now() - timedelta(minutes=5),
-        "channel_id": None,
-        "updated_at": datetime.now().isoformat(),
-        "environment": environment
-    }
-    logger.info(f"Using default app state (looking back 5 minutes) for environment: {environment}")
-    return state_data
 
-def save_app_state(state_data):
-    """Save the application state to Supabase database (no filesystem backup)."""
-    if not isinstance(state_data, dict):
-        logger.error("Invalid state_data provided to save_app_state. Must be a dict.")
-        return
-
-    environment = _get_environment()
-    
-    # Prepare state for saving
-    state_to_save = state_data.copy()
-    state_to_save["updated_at"] = datetime.now().isoformat()
-    state_to_save["environment"] = environment
-    
-    # Convert datetime to ISO string for JSON serialization
-    if isinstance(state_to_save.get("timestamp"), datetime):
-        state_to_save["timestamp"] = state_to_save["timestamp"].isoformat()
-
-    # Save to database first
-    supabase_url = os.environ.get('SUPABASE_URL')
-    supabase_key = os.environ.get('SUPABASE_KEY')
-    
-    database_success = False
-    
-    if supabase_url and supabase_key:
-        try:
-            import httpx
-            
-            headers = {
-                'apikey': supabase_key,
-                'Authorization': f'Bearer {supabase_key}',
-                'Content-Type': 'application/json',
-                'Prefer': 'resolution=merge-duplicates'
-            }
-            
-            # Use PATCH with environment filter for proper upsert
-            response = httpx.patch(
-                f"{supabase_url}/rest/v1/app_state",
-                headers=headers,
-                params={'environment': f'eq.{environment}'},
-                json=state_to_save
-            )
-            
-            if response.status_code in [200, 201, 204]:
-                logger.info(f"Saved app state to database (environment: {environment})")
-                database_success = True
-            else:
-                logger.error(f"Failed to save app state to database: {response.status_code} {response.text}")
-                
-        except Exception as e:
-            logger.error(f"Error saving app state to database: {e}")
-    
-    if not database_success:
-        logger.error("App state was NOT saved to database – state persistence lost!")
 
 def setup_session():
     """

@@ -30,21 +30,22 @@ erDiagram
         float avg_memory_similarity
     }
     
-    app_state {
-        varchar environment PK
-        
-        timestamp updated_at
+    memory_usage_analytics {
+        uuid id PK
+        uuid session_id FK
+        text memory_pair_id
+        float similarity_score
     }
 ```
 
-### Critical Tables
+### Core Tables
 
 | Table | Purpose | Key Feature |
 |-------|---------|-------------|
 | `telegram_sessions` | Session persistence | Compressed storage |
 | `article_chunks` | Translation memory | pgvector embeddings |
-| `app_state` | State tracking | Environment isolation |
-| `translation_sessions` | Analytics | Performance metrics |
+| `translation_sessions` | Translation analytics | Performance metrics |
+| `memory_usage_analytics` | Memory effectiveness | Similarity tracking |
 
 ## 🧠 Vector Storage Architecture
 
@@ -90,11 +91,11 @@ encoded = base64.b64encode(compressed).decode()
 ```
 
 ### Environment Isolation
-| Environment | Data Scope | Purpose |
-|-------------|------------|---------|
-| `local` | Development state | Local testing |
-| `production` | Live bot state | Production operations |
-| `test` | Test isolation | Automated testing |
+| Environment | Session Scope | Purpose |
+|-------------|---------------|---------|
+| `local` | Development sessions | Local testing |
+| `production` | Live bot sessions | Production operations |
+| `test` | Test sessions | Automated testing |
 
 ## 📊 Analytics Architecture
 
