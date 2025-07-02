@@ -150,46 +150,4 @@ async def translate_and_link(client, src_text, mem):
         logger.error(f"Failed to translate+link text of length {len(src_text)}")
         raise
 
-async def safety_check_translation(client, translated_text):
-    """
-    Perform a safety check on the translated text to determine if it's appropriate to post.
-    Returns True if safe to post, False if should be skipped.
-    """
-    try:
-        logger.info("Performing safety check on translated content")
-        
-        safety_prompt = (
-            "You are a content moderation assistant. Review the following Russian text and determine if it's appropriate to post on a public Telegram channel.\n\n"
-            "Check for:\n"
-            "1. Refusal text (like 'I cannot help with that' or similar)\n"
-            "2. Inappropriate content for public posting\n"
-            "3. Overly sensitive or offensive material\n"
-            "4. Content that might violate platform guidelines\n\n"
-            "Respond with ONLY 'SAFE' if the content is appropriate to post, or 'UNSAFE' if it should not be posted.\n"
-            "Do not provide any explanation, just the single word response."
-        )
-        
-        resp = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=10,  # Very short response needed
-            temperature=0.1,  # Low temperature for consistent safety decisions
-            system=safety_prompt,
-            messages=[
-                {"role": "user", "content": translated_text}
-            ]
-        )
-        
-        safety_result = resp.content[0].text.strip().upper()
-        logger.info(f"Safety check result: {safety_result}")
-        
-        is_safe = safety_result == "SAFE"
-        if not is_safe:
-            logger.warning(f"Translation failed safety check: {safety_result}")
-        
-        return is_safe
-        
-    except Exception as e:
-        logger.error(f"Error during safety check: {str(e)}", exc_info=True)
-        # If safety check fails, err on the side of caution and don't post
-        logger.warning("Safety check failed, skipping post as precaution")
-        return False 
+ 

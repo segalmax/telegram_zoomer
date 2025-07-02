@@ -9,21 +9,17 @@ import logging
 import time
 import sys
 import uuid
-import re
 from pathlib import Path
 from telethon import TelegramClient, events
-from telethon.network import ConnectionTcpFull, ConnectionTcpAbridged, ConnectionTcpIntermediate
+from telethon.network import ConnectionTcpAbridged
 from telethon.sessions import StringSession
-from telethon import utils
 import anthropic
 from dotenv import load_dotenv
-from .translator import get_anthropic_client, translate_and_link, safety_check_translation
+from .translator import get_anthropic_client, translate_and_link
 
 from .session_manager import setup_session, save_session_after_auth
-from telethon.tl.functions.account import UpdateStatusRequest
 from telethon.errors import SessionPasswordNeededError
 from datetime import datetime, timedelta
-import random
 import argparse
 
 from .vector_store import recall as recall_tm, save_pair as store_tm
@@ -55,10 +51,6 @@ SRC_CHANNEL = os.getenv('SRC_CHANNEL')
 DST_CHANNEL = os.getenv('DST_CHANNEL')
 
 ANTHROPIC_KEY = os.getenv('ANTHROPIC_API_KEY')
-PROCESS_RECENT = os.getenv('PROCESS_RECENT', 0)
-CHECK_CHANNEL_INTERVAL = int(os.getenv('CHECK_CHANNEL_INTERVAL', '300'))  # Default to 5 minutes
-KEEP_ALIVE_INTERVAL = int(os.getenv('KEEP_ALIVE_INTERVAL', '60'))  # Keep connection alive every minute
-MANUAL_POLL_INTERVAL = int(os.getenv('MANUAL_POLL_INTERVAL', '180'))  # Manual polling every 3 minutes
 
 
 # Configure logging
@@ -387,38 +379,7 @@ async def process_recent_posts(client_instance, limit=10, timeout=300):
         logger.error(f"Error in batch processing: {str(e)}", exc_info=True)
         return 0
 
-async def ping_server(client_instance):
-    # Renamed client to client_instance
-    logger.info("Starting background ping process...")
-    while True:
-        try:
-            if not client_instance.is_connected():
-                logger.warning("Connection lost, attempting to reconnect...")
-                await client_instance.connect()
-            if await client_instance.is_user_authorized(): # Check authorization before get_me
-                me = await client_instance.get_me()
-                if me: logger.info(f"Ping successful - connected as {me.first_name}")
-                else: logger.warning("Ping failed - no user info returned after get_me")
-            else: # Not authorized, try to reconnect and re-auth
-                logger.warning("Ping: Not authorized. Attempting full reconnect cycle.")
-                await client_instance.disconnect()
-                await asyncio.sleep(5)
-                await client_instance.connect()
-                if not await client_instance.is_connected():
-                    logger.error("Ping: Reconnect attempt failed.")
-                    # Potentially trigger a restart or alert here if it keeps failing
-                else: # Reconnected, now try to start (which includes auth)
-                    logger.info("Ping: Reconnected, now attempting to re-authorize...")
-                    await client_instance.start(phone=TG_PHONE) # Attempt re-auth
-                    if await client_instance.is_user_authorized():
-                        logger.info("Ping: Successfully reconnected and re-authorized.")
-                    else:
-                        logger.error("Ping: Re-authorization failed after reconnect.")
-        except Exception as e:
-            logger.error(f"Error during ping or reconnection attempt: {str(e)}", exc_info=True)
-            # Basic backoff before next cycle if major error in ping
-            await asyncio.sleep(60) 
-        await asyncio.sleep(300) # 5 minutes
+
 
 async def process_recent_messages(client, count):
     """Process a specified number of recent messages from source channel"""
@@ -457,101 +418,9 @@ async def process_recent_messages(client, count):
         logger.exception(f"Error processing recent messages: {e}")
         return False
 
-async def background_keep_alive(client):
-    """Background task to keep the connection alive and ensure updates are received"""
-    logger.info("Starting background keep-alive task")
-    count = 0
-    
-    while True:
-        try:
-            # Update online status to ensure Telegram knows we're active
-            await client(UpdateStatusRequest(offline=False))
-            
-            # Log less frequently to reduce noise, only every 5 times
-            count += 1
-            if count % 5 == 1:
-                logger.info("Connection keep-alive: online status updated")
-                # Add a test entry to show we're actively running
-                logger.info(f"Bot active and monitoring channel: {SRC_CHANNEL} → {DST_CHANNEL}")
-            else:
-                logger.debug("Connection keep-alive ping sent")
-            
-            # Sleep until next interval
-            await asyncio.sleep(KEEP_ALIVE_INTERVAL)
-        except Exception as e:
-            logger.error(f"Error in keep-alive task: {e}")
-            await asyncio.sleep(30)  # Shorter sleep on error
 
-async def background_update_checker(client):
-    """Background task to manually check for updates in case event handlers miss them"""
-    logger.info("Starting background update checker task")
-    last_check_time = datetime.now()
-    
-    while True:
-        try:
-            # Force catch up to get any missed updates
-            try:
-                await client.catch_up()
-                logger.debug("Force update catch-up completed")
-            except Exception as e:
-                logger.debug(f"Force update catch-up note: {e}")
-            
-            # Calculate time since last check
-            now = datetime.now()
-            time_since_check = (now - last_check_time).total_seconds()
-            
-            if time_since_check >= CHECK_CHANNEL_INTERVAL:
-                logger.info(f"Checking for any missed messages (last check was {time_since_check:.1f} seconds ago)")
-                
-                # Get recent messages from source channel
-                messages = await client.get_messages(SRC_CHANNEL, limit=5)
-                
-                # Find messages within the last check interval
-                for msg in messages:
-                    if not msg.text:
-                        continue
-                        
-                    msg_time = msg.date.replace(tzinfo=None)  # Remove timezone for comparison
-                    
-                    # Check if this message is new since our last check
-                    if (now - msg_time) < timedelta(seconds=CHECK_CHANNEL_INTERVAL * 1.1):
-                        logger.info(f"Found possibly missed message ID: {msg.id} from {msg_time}")
-                        
-                        # Check if message was already processed by checking recent posts in destination
-                        dst_messages = await client.get_messages(DST_CHANNEL, limit=10)
-                        already_processed = False
-                        
-                        # Simple content-based check (could be improved)
-                        for dst_msg in dst_messages:
-                            if dst_msg.text and msg.text[:50] in dst_msg.text:
-                                already_processed = True
-                                break
-                                
-                        if not already_processed:
-                            # Extract URLs from message entities
-                            message_entity_urls = []
-                            if hasattr(msg, 'entities') and msg.entities:
-                                for entity in msg.entities:
-                                    if hasattr(entity, 'url') and entity.url:
-                                        message_entity_urls.append(entity.url)
-                                    elif hasattr(entity, '_') and entity._ in ('MessageEntityUrl', 'MessageEntityTextUrl'):
-                                        if hasattr(entity, 'offset') and hasattr(entity, 'length'):
-                                            url_text = msg.text[entity.offset:entity.offset + entity.length]
-                                            if url_text.startswith('http'):
-                                                message_entity_urls.append(url_text)
-                            
-                            logger.info(f"Processing potentially missed message ID: {msg.id}")
-                            sent_message = await translate_and_post(client, msg.text, msg.id, message_entity_urls=message_entity_urls)
-                
-                # Update last check time
-                last_check_time = now
-                logger.info("Missed message check completed")
-            
-            # Sleep until next manual poll cycle
-            await asyncio.sleep(MANUAL_POLL_INTERVAL)
-        except Exception as e:
-            logger.error(f"Error in update checker: {e}")
-            await asyncio.sleep(60)  # Sleep on error before retry
+
+
 
 async def main():
     """
