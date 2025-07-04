@@ -138,7 +138,8 @@ The translation system leverages Claude's extended thinking capabilities:
    - Evaluates key terms and optimal Russian equivalents
    - Considers tone and stylistic elements
    - Identifies connections to previous posts from memory
-   - Plans precise, cutting formulations for RIGHT-BIDLO style
+   - Plans precise, cutting formulations for modern Lurkmore style
+   - **CRITICAL: Anti-Repetition Analysis** - Studies ALL past translations to avoid repeating any phrases, jokes, or word combinations
    - Optimizes structure for maximum impact
 
 2. **Translation Generation**:
@@ -146,6 +147,52 @@ The translation system leverages Claude's extended thinking capabilities:
    - Integrates semantic links to relevant memory entries
    - Maintains cynical but informative tone
    - Keeps within 800 character limit (1-3 paragraphs)
+   - **Ensures complete originality** - no repetition even at micro-level
+
+## 🚫 Anti-Repetition System
+
+### Critical Innovation Requirement
+The system **MUST** analyze all past translations and avoid repeating:
+- Any phrases, even 2-3 word combinations
+- Jokes, one-liners, or humor patterns  
+- Sentence structures from previous posts
+- Characteristic speech patterns or connecting words
+- Introductory phrases or transitions
+- Stylistic devices from recent translations
+
+### Self-Analysis Process
+```python
+# Extended thinking includes mandatory self-analysis:
+thinking_instructions = """
+КРИТИЧЕСКИ ВАЖНО - АНАЛИЗ ПРОШЛЫХ ПЕРЕВОДОВ:
+7. Внимательно изучи ВСЕ предыдущие посты из памяти
+8. Выпиши КОНКРЕТНЫЕ фразы, шутки, обороты, даже мелкие словосочетания
+9. Найди повторяющиеся паттерны в прошлых переводах
+10. ЗАПРЕТИ себе использовать ВСЕ найденные фразы
+11. Придумай СВЕЖИЕ, ОРИГИНАЛЬНЫЕ формулировки
+12. Проверь финальный перевод на отсутствие повторов даже на микроуровне
+"""
+```
+
+### Innovation Requirements
+- **Each translation**: Unique formulations and fresh approaches
+- **Humor evolution**: New jokes and satirical angles every time
+- **Language innovation**: Constantly evolving expression methods
+- **Micro-level originality**: Even small connecting words must vary
+- **Style evolution**: Prevents content from becoming stale or predictable
+
+### Examples of Forbidden Repetition
+```markdown
+❌ BAD: Repeating "классическая ситуация" from past posts
+❌ BAD: Using same cynical phrases like "как всегда" repeatedly
+❌ BAD: Copying sentence structure: "X делает Y, а Z получает прибыль"
+❌ BAD: Reusing transition words: "между тем", "кстати", "впрочем"
+
+✅ GOOD: Fresh formulations for every translation
+✅ GOOD: New satirical angles on familiar topics  
+✅ GOOD: Evolving vocabulary and expression methods
+✅ GOOD: Original micro-level word choices each time
+```
 
 ## Quality Enhancements
 
