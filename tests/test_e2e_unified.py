@@ -252,9 +252,8 @@ async def test_telegram_pipeline(test_args):
 
 
 
-@pytest.mark.order(-1) # Try to run this test last in the module
 def test_verify_no_errors_logged(error_counter_handler):
-    """Final check for any errors logged during the test session."""
+    """Final check for any errors logged during the test session. Runs last by default due to test name."""
     if error_counter_handler.error_count > 0:
         messages = [f"- {rec.levelname} ({rec.name} L{rec.lineno}): {rec.getMessage()}" for rec in error_counter_handler.records]
         error_summary = "\n".join(messages)
