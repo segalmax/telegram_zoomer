@@ -174,14 +174,11 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
                 analytics.set_memory_metrics(memory, int(memory_query_time * 1000))
                 analytics.track_memory_usage(session_id, memory)
                 
-                mem_block = "\n".join(
-                    f"- Source: {m['source_text']}\n  Translation: {m['translation_text']}" for m in memory
-                )
-                translation_context = (
-                    "Previous translations for consistency:\n" f"{mem_block}\n\n" + translation_context
-                )
+                # Don't add full memory dump to user context - Claude gets compact summaries in system prompt
+                # This prevents context overload that can cause poor linking decisions
+                logger.info(f"🔄 Memory context will be provided via system prompt, not user message")
                 
-                logger.info(f"🔄 Enhanced translation context: {len(translation_context)} chars (added {len(mem_block)} chars from memory)")
+                logger.info(f"🔄 Translation context: {len(translation_context)} chars (memory provided separately via system prompt)")
             else:
                 logger.warning(f"❌ No memories found for message {message_id} in {memory_query_time:.3f}s")
                 analytics.set_memory_metrics([], int(memory_query_time * 1000))
