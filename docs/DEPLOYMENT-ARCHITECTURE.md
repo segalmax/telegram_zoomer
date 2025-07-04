@@ -1,122 +1,187 @@
 # 🚀 Deployment Architecture
 
 ## 🎯 Deployment Philosophy
-Stateless application + database-backed persistence = Heroku-safe deployment
+Database-first design for Heroku ephemeral filesystem → zero local state
 
 ## 🏗️ Heroku Architecture
 
 ```mermaid
 graph TB
-    DEV[Local Development] --> GIT[Git Repository]
-    GIT --> HEROKU[Heroku Platform]
-    HEROKU --> DYNO[Worker Dyno]
-    DYNO --> SUPABASE[(Supabase)]
-    DYNO --> TELEGRAM[Telegram API]
-    DYNO --> CLAUDE[Claude API]
+    GIT[Git Push] --> HEROKU[Heroku Dyno]
+    HEROKU --> BOT[Bot Process]
+    BOT --> SUPABASE[(Supabase DB)]
+    BOT --> TELEGRAM[Telegram API]
+    BOT --> ANTHROPIC[Claude API]
+    BOT --> OPENAI[OpenAI API]
+    
+    subgraph "External Services"
+        TELEGRAM
+        ANTHROPIC
+        OPENAI
+    end
+    
+    subgraph "Persistent Storage"
+        SUPABASE
+    end
 ```
 
-## 🔄 Deployment Flow
+## 📦 Heroku Configuration
 
-### Pre-deployment Validation
-```bash
-# 1. Test everything locally
-source .venv/bin/activate
-python -m pytest tests/ -v
-./tests/test_polling_flow.sh
+### Buildpacks & Runtime
+```python
+# runtime.txt
+python-3.9.6
 
-# 2. Sync environment to Heroku  
-./setup_heroku.sh
-
-# 3. Deploy
-git push heroku main
-```
-
-### Environment Synchronization ([`setup_heroku.sh`](../setup_heroku.sh))
-- **Single source of truth** → Merges `.env` + `app_settings.env`
-- **Heroku config sync** → Never use `heroku config:set` manually
-- **Variable validation** → Ensures required vars present
-
-## ⚙️ Heroku Configuration
-
-### Process Definition (`Procfile`)
-```
+# Procfile
 worker: python -m app.bot
 ```
 
-### Runtime Specification (`runtime.txt`)
+### Environment Variables
+```bash
+# Heroku Config Vars (required)
+heroku config:set TG_API_ID=12345
+heroku config:set TG_API_HASH=abcdef123456
+heroku config:set ANTHROPIC_API_KEY=sk-ant-...
+heroku config:set OPENAI_API_KEY=sk-...
+heroku config:set SUPABASE_URL=https://xxx.supabase.co
+heroku config:set SUPABASE_KEY=eyJhbGciOiJIUzI1...
+heroku config:set SRC_CHANNEL=@source_channel
+heroku config:set DST_CHANNEL=@destination_channel
+heroku config:set TG_COMPRESSED_SESSION_STRING=AQAAAIGBAWQBAYDd...
 ```
-python-3.10.12
+
+## 🔄 Deployment Process
+
+### Initial Setup
+```bash
+# 1. Create Heroku app
+heroku create telegram-zoomer-bot
+
+# 2. Add buildpacks
+heroku buildpacks:add heroku/python
+
+# 3. Set config vars
+heroku config:set KEY=value
+
+# 4. Deploy
+git push heroku main
 ```
+
+### Session Management
+```python
+# Heroku deployment uses 'production' environment
+# Sessions stored in telegram_sessions table
+# Auto-compression: gzip + base64 encoding
+```
+
+## 📊 Monitoring & Logs
+
+### Log Monitoring
+```bash
+# Real-time logs
+heroku logs --tail
+
+# Application logs
+heroku logs --source app
+
+# Error filtering
+heroku logs --tail | grep ERROR
+```
+
+### Key Log Patterns
+```python
+# Successful translation
+"📊 Session completed: 15000ms"
+"💾 Successfully saved pair"
+
+# Memory system
+"🧠 Found 8 relevant memories"
+"📊 Memory stats: avg_sim=0.75"
+
+# Errors to monitor
+"💥 TM recall failed"
+"Authentication failed"
+"API error"
+```
+
+## ⚡ Performance Optimization
 
 ### Dyno Configuration
-- **Process type** → Worker (not web)
-- **Scaling** → 1 dyno (single instance)
-- **Restart policy** → Automatic on crash
+```bash
+# Worker dyno (recommended)
+heroku ps:scale worker=1
 
-## 🗄️ Stateless Design
-
-### No Local Storage
-- **Sessions** → Compressed in Supabase database
-
-- **Translation memory** → Vector embeddings in database
-- **Analytics** → All metrics in database
+# Resource limits
+# - Memory: 512MB default
+# - CPU: Shared
+# - Disk: Ephemeral (database-first design)
+```
 
 ### Environment Detection
 ```python
-def _get_environment():
-    is_heroku = os.getenv('DYNO') is not None
-    is_test = os.getenv('TEST_MODE') == 'true'
-    
-    if is_test:
-        return "test"
-    elif is_heroku:  
-        return "production"
-    else:
-        return "local"
+# Auto-detects Heroku environment
+is_heroku = os.getenv('DYNO') is not None
+
+if is_heroku:
+    # Use production session and channels
+    # Enable Heroku-specific optimizations
 ```
 
-## 🔧 Configuration Management
+## 🔧 Database Connectivity
 
-### Required Environment Variables
+### Supabase Integration
+- **Connection pooling**: Automatic via supabase-py
+- **Environment isolation**: Production tables only
+- **Session persistence**: Compressed storage
+
+### Connection Testing
+```python
+# Validate connectivity on startup
+try:
+    _sb = create_client(SUPABASE_URL, SUPABASE_KEY)
+    logger.info("Database connection successful")
+except Exception as e:
+    logger.error(f"Database connection failed: {e}")
+    sys.exit(1)
+```
+
+## 🚨 Error Handling
+
+### Common Deployment Issues
+```python
+# Missing environment variables
+assert ANTHROPIC_API_KEY, "ANTHROPIC_API_KEY required"
+assert SUPABASE_URL, "SUPABASE_URL required"
+
+# Session authentication
+# Ensure TG_COMPRESSED_SESSION_STRING is set
+# Use database session management
+```
+
+### Recovery Procedures
 ```bash
-# Telegram API
-TG_API_ID=12345678
-TG_API_HASH=abcd1234...
+# Restart dyno
+heroku restart
 
-# AI Services  
-ANTHROPIC_API_KEY=sk-ant-...
+# Check config
+heroku config
 
-# Database
-SUPABASE_URL=https://xxx.supabase.co
-SUPABASE_KEY=eyJhbGciOiJIUzI1...
-
-# Channels
-SRC_CHANNEL=@source_channel
-DST_CHANNEL=@destination_channel
+# Validate logs
+heroku logs --tail
 ```
 
-### Deployment Validation
-```bash
-# Check dyno health
-heroku ps --app <app-name>
+## 📈 Scaling Considerations
 
-# Monitor logs
-heroku logs --tail --app <app-name>
+### Current Architecture
+- **Single worker dyno**: Handles event-driven processing
+- **Database bottleneck**: Supabase handles load
+- **API limits**: Anthropic/OpenAI rate limiting
 
-# Validate functionality
-# Send test message → verify translation appears
+### Scaling Strategy
+```python
+# Horizontal scaling preparation
+# - Stateless design ✅
+# - Database-first ✅  
+# - No file dependencies ✅
+# Ready for multi-dyno deployment
 ```
-
-## 🚨 Production Monitoring
-
-### Health Indicators
-- **Dyno status** → Running without crashes
-- **Log patterns** → No ERROR-level messages
-- **Translation flow** → Messages processed successfully
-- **Database connectivity** → Supabase operations working
-
-### Common Issues
-- **Session authentication** → Check compressed session validity
-- **Environment variables** → Verify all required vars set
-- **Database access** → Confirm Supabase credentials
-- **API rate limits** → Monitor Telegram/Claude usage 

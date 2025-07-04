@@ -1,112 +1,118 @@
 # 💾 Data Architecture
 
-## 🎯 Core Philosophy  
-Everything in Supabase database → zero local state → Heroku-safe
+## 🎯 Design Philosophy  
+Database-first → Zero local state → Heroku-safe
 
-## 🏗️ Database Design
-
-### Tables Overview
+## 🏗️ Core Tables (4 total)
 
 ```mermaid
 erDiagram
     telegram_sessions {
         varchar session_name PK
-        text session_data
-        varchar environment
+        text session_data "gzip+base64"
+        varchar environment "local|test|production"
+        timestamp updated_at
     }
     
     article_chunks {
-        varchar id PK
+        uuid id PK
         text source_text
         text translation_text
-        vector embedding
+        vector embedding "1536d OpenAI"
         varchar message_url
+        timestamp created_at
     }
     
     translation_sessions {
-        varchar id PK
+        uuid id PK
+        varchar message_id
         int total_processing_time_ms
         int memories_found
         float avg_memory_similarity
+        boolean success
+        timestamp session_start_time
     }
     
     memory_usage_analytics {
         uuid id PK
         uuid session_id FK
-        text memory_pair_id
+        uuid memory_pair_id FK
         float similarity_score
+        float combined_score
+        int rank_position
     }
 ```
 
-### Core Tables
+## 📊 Table Functions
 
-| Table | Purpose | Key Feature |
-|-------|---------|-------------|
+| Table | Purpose | Critical Feature |
+|-------|---------|------------------|
 | `telegram_sessions` | Session persistence | Compressed storage |
 | `article_chunks` | Translation memory | pgvector embeddings |
-| `translation_sessions` | Translation analytics | Performance metrics |
+| `translation_sessions` | Performance analytics | Processing metrics |
 | `memory_usage_analytics` | Memory effectiveness | Similarity tracking |
 
-## 🧠 Vector Storage Architecture
+## 🧠 Vector Memory System
 
-### pgvector Integration
-- **Embedding model** → OpenAI text-embedding-ada-002 (1536 dimensions)
-- **Similarity search** → Cosine similarity with SQL function
-- **Performance** → Indexed vector operations
-
-### Memory Storage Flow
+### Storage Strategy
 ```python
-# Store translation memory
-embedding = openai.embed(source_text)
-save_pair(source_text, translation, embedding, message_url)
+# Store: source → translation + embedding
+embedding = openai.embed(source_text)  # 1536 dimensions
+save_pair(source, translation, embedding, message_url)
 
-# Retrieve similar memories  
+# Recall: semantic similarity search
 memories = recall(query_text, k=10)  # Top 10 matches
 ```
 
-### Vector Query ([`app/vector_store.py:170`](../app/vector_store.py#L170))
+### Vector Query Function
 ```sql
--- Semantic similarity search
-SELECT id, source_text, translation_text, message_url,
-       (embedding <=> query_embedding) as similarity
-FROM article_chunks
-ORDER BY embedding <=> query_embedding
-LIMIT 10;
+-- pgvector similarity search
+CREATE OR REPLACE FUNCTION match_article_chunks(
+  query_embedding vector(1536),
+  match_count int
+)
+RETURNS TABLE (
+  id uuid,
+  source_text text,
+  translation_text text,
+  message_url text,
+  similarity float
+)
+AS $$
+BEGIN
+  RETURN QUERY
+  SELECT
+    article_chunks.id,
+    article_chunks.source_text,
+    article_chunks.translation_text,
+    article_chunks.message_url,
+    (article_chunks.embedding <=> query_embedding) as similarity
+  FROM article_chunks
+  ORDER BY article_chunks.embedding <=> query_embedding
+  LIMIT match_count;
+END;
+$$ LANGUAGE plpgsql;
 ```
 
-## 🔄 Persistence Strategy
+## 🔄 Session Management
 
-### Why Database-First?
-- **Heroku constraint** → ephemeral filesystem
-- **State continuity** → survive dyno restarts  
-- **Environment isolation** → clean separation
-- **Scalability** → shared state across instances
-
-### Session Compression
+### Compression Strategy
 ```python
-# Compress session for storage efficiency
+# Telegram session compression for storage
 session_string = client.session.save()
 compressed = gzip.compress(session_string.encode())
-encoded = base64.b64encode(compressed).decode()
+stored = base64.b64encode(compressed).decode()
 ```
 
 ### Environment Isolation
-| Environment | Session Scope | Purpose |
-|-------------|---------------|---------|
-| `local` | Development sessions | Local testing |
-| `production` | Live bot sessions | Production operations |
-| `test` | Test sessions | Automated testing |
+- **local**: Development sessions
+- **production**: Live bot operations  
+- **test**: Automated testing
 
-## 📊 Analytics Architecture
+## 📈 Analytics Architecture
 
-### Performance Tracking
-- **Session metrics** → processing times, success rates
-- **Memory effectiveness** → similarity scores, usage patterns
-- **System health** → error rates, response times
-
-### Data Points Collected
+### Key Metrics Tracked
 ```python
-# Key metrics per translation
 {
     'total_processing_time_ms': 15000,
     'memory_query_time_ms': 200,
@@ -116,18 +122,20 @@ encoded = base64.b64encode(compressed).decode()
 }
 ```
 
-## 🔧 Configuration
+### Memory Effectiveness
+- **Similarity scores**: Track semantic relevance
+- **Rank positions**: Understand usage patterns
+- **Combined scores**: Similarity + recency weighting
 
-### Supabase Setup
+## ⚙️ Configuration
 ```bash
+# Supabase
 SUPABASE_URL=https://xxx.supabase.co
 SUPABASE_KEY=eyJhbGciOiJIUzI1...
-```
 
-### Vector Configuration
-```bash
-EMBED_MODEL=text-embedding-ada-002    # OpenAI model
-TM_RECENCY_WEIGHT=0.3                # Memory ranking balance
+# Vector
+EMBED_MODEL=text-embedding-ada-002
+TM_RECENCY_WEIGHT=0.3
 ```
 
 ## 🚀 Performance Optimizations

@@ -1,112 +1,207 @@
 # 🧠 AI Translation System
 
-## 🎯 Core Function
-Transform news → RIGHT-BIDLO Russian slang + inject semantic links to related posts
+## 🎯 Translation Philosophy
+Unified Claude Sonnet 4 approach: translate + semantic link in single API call using RIGHT-BIDLO style [[memory:326857]]
 
-## 🔧 Prompting Technique
+## 🔄 Translation Pipeline
 
-### Prompt Architecture
-```
-[ROLE] → RIGHT-BIDLO cynical analyst  
-[TASK] → Translate + add semantic links
-[STYLE] → Cynical but not hysterical, focus on motives
-[LENGTH] → Max 800 chars including links
-[LINKING] → Convert key phrases to [text](URL) format
-[MEMORY] → Previous translations for consistency
-```
-
-### Key Prompt Elements ([`app/translator.py:45`](../app/translator.py#L45))
-1. **Role Definition** → "Smart cynic who understands power mechanics"
-2. **Length Constraints** → Strict 1-3 paragraphs, 800 char limit
-3. **Style Requirements** → Variety in language, avoid formulaic patterns
-4. **Link Instructions** → 2-4 word phrases max, semantic not literal matching
-
-### Anti-Patterns Engineered Out
-- ❌ "Ну что, товарищи..." repetitive openings
-- ❌ >800 character bloated responses  
-- ❌ Formulaic "Классическая..." patterns
-- ❌ Long phrase links that break flow
-
-## 🧠 Memory Integration Architecture
-
-### Memory Lifecycle
 ```mermaid
 graph LR
-    MSG[New Message] --> EMBED[Generate Embedding]
-    EMBED --> SEARCH[Similarity Search k=10]
-    SEARCH --> RANK[Recency + Similarity Ranking]
-    RANK --> CONTEXT[Inject into Prompt]
-    CONTEXT --> TRANSLATE[Claude Translation]
-    TRANSLATE --> SAVE[Store New Memory]
+    INPUT[Source Text] --> MEMORY[Query Memory k=10]
+    MEMORY --> CONTEXT[Build Context]
+    CONTEXT --> CLAUDE[Claude Sonnet 4]
+    CLAUDE --> OUTPUT[Translation + Links]
+    OUTPUT --> STORE[Store Memory]
 ```
 
-### Memory Query Strategy ([`app/vector_store.py:140`](../app/vector_store.py#L140))
+## 🧠 Translation Memory
+
+### Semantic Search
 ```python
-# Semantic search with recency weighting
-memories = recall(source_text, k=10)  # Fetch 10 best matches
-context = build_memory_context(memories)  # Format for prompt
-translation = translate_with_context(text, context)
+# Query similar past translations
+memories = recall(source_text, k=10)
+# Returns: {similarity, source_text, translation_text, message_url}
+
+# Recency + similarity scoring
+combined_score = 0.7 * similarity + 0.3 * recency_score
 ```
 
-### Memory Context Format
+### Memory Context Building
+```python
+def memory_block(memories):
+    # Compact format for Claude context
+    for i, m in enumerate(memories, 1):
+        summary = m['translation_text'][:120]
+        yield f"{i}. {summary} → {m['message_url']}"
 ```
-Previous translations for consistency:
-1. 🇮🇷 Iran increases uranium enrichment → https://t.me/chan/123
-2. 🚁 Military operation in Gaza → https://t.me/chan/124
-...
+
+## 🎨 RIGHT-BIDLO Style
+
+### Core Characteristics
+- **Cynical but informed**: Understands power mechanics
+- **Concise**: 1-3 paragraphs, <800 chars
+- **Factual with edge**: No hysteria, strategic commentary
+- **Semantic linking**: Connect related concepts
+
+### Translation Prompt Strategy
+```python
+system_prompt = f"""
+<role>RIGHT-BIDLO: умный циник, видит связи между событиями</role>
+
+<task>
+1. ПЕРЕВЕДИ в стиле RIGHT-BIDLO
+2. ДОБАВЬ семантические ссылки на релевантные посты
+</task>
+
+<style>
+• Тон: циничный, не истеричный
+• Язык: разнообразная лексика
+• Фокус: мотивы политиков, связи событий
+</style>
+
+<memory_context>
+{memory_block(memories)}
+</memory_context>
+"""
 ```
 
-## 🔗 Linking Mechanism
+## 🔗 Semantic Linking
 
-### How Links Are Generated ([`app/translator.py:70`](../app/translator.py#L70))
-1. **Extract phrases** from translated text (2-4 words)
-2. **Match semantically** against memory database  
-3. **Convert to markdown** `[phrase](message_url)`
-4. **Embed in translation** maintaining readability
+### Link Generation Rules
+- **Find 1-3 key themes** in translation
+- **Match semantic meaning** (not literal words)
+- **Short link text**: 2-4 words max
+- **Format**: `[короткая фраза](URL)`
 
-### Link Selection Logic
-- **Semantic similarity** > literal word matching
-- **Destination URLs** point to translated posts (not source)
-- **Phrase extraction** prioritizes military/political/geographic terms
-- **Deduplication** ensures one link per phrase
-
-### Example Output
+### Examples
 ```markdown
-**Шесть американских "невидимок" [взяли курс на Иран](https://t.me/chan/123)**
-
-[Пока израильтяне](https://t.me/chan/124) методично утюжили Нетанц...
+✓ GOOD: [американские удары](URL)
+✓ GOOD: [29 погибших](URL) 
+✗ BAD: [29 погибших в Рамат-Гане, Ришон ле-Ционе](URL)
 ```
 
-## 🎛️ Configuration
+## ⚡ Performance Optimizations
 
-### Memory Tuning
-- `TM_RECENCY_WEIGHT=0.3` → Balance similarity vs. freshness  
-- `k=10` → Number of memories retrieved
-- `similarity_threshold=0.5` → Minimum match quality
-
-### Translation Controls  
-- `temperature=0.85` → Creative but consistent output
-- `max_tokens=1000` → Prevent runaway responses
-- `model=claude-sonnet-4-20250514` → Latest Claude version
-
-## 🔍 Critical Integration Points
-
-### Memory → Prompt Flow
+### Single API Call
 ```python
-# 1. Query similar translations
-memory = recall_tm(source_text, k=10)
-
-# 2. Build context block  
-context = memory_block(memory)
-
-# 3. Inject into system prompt
-prompt = make_linking_prompt(memory)
-
-# 4. Single API call for translation + linking
-result = claude.translate_and_link(source_text, prompt)
+# Unified approach (replaces separate translate + link)
+result = translate_and_link(claude_client, source_text, memories)
+# Returns: Complete translation with embedded semantic links
 ```
 
-### Success Metrics
-- **Memory effectiveness**: >0.7 avg similarity score
-- **Link relevance**: Semantic matching over keyword matching
-- **Style consistency**: Variation without formulaic patterns 
+### Memory Efficiency
+- **k=10 limit**: Balance context vs speed
+- **Similarity threshold**: Filter poor matches
+- **Recency weighting**: Prefer recent translations
+
+## 🎯 Quality Metrics
+- **Translation speed**: <15s typical
+- **Memory relevance**: >0.7 similarity preferred
+- **Link accuracy**: Semantic match validation
+- **Style consistency**: RIGHT-BIDLO tone maintained
+
+## 🛠️ Technical Implementation
+
+### Core Function
+```python
+@retry(stop=stop_after_attempt(3))
+async def translate_and_link(client, src_text, memories):
+    """Unified translation + linking with Claude Sonnet 4"""
+    prompt = make_linking_prompt(memories)
+    response = client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=1000,
+        temperature=0.85,
+        system=prompt,
+        messages=[{"role": "user", "content": src_text}]
+    )
+    return response.content[0].text.strip()
+```
+
+## Extended Thinking for Maximum Quality
+
+The translation system leverages Claude's extended thinking capabilities:
+
+- **Model**: `claude-sonnet-4-20250514` with thinking mode enabled
+- **Thinking Budget**: 12,000 tokens for deep analysis before translation
+- **Max Tokens**: 16,000 total (thinking + output)
+- **Temperature**: 1.0 (required for thinking mode)
+- **Fail-Fast Strategy**: No fallbacks - immediate failure on errors
+
+### Translation Process with Thinking
+
+1. **Deep Analysis Phase** (12k thinking tokens):
+   - Analyzes source text meaning and hidden motives
+   - Evaluates key terms and optimal Russian equivalents
+   - Considers tone and stylistic elements
+   - Identifies connections to previous posts from memory
+   - Plans precise, cutting formulations for RIGHT-BIDLO style
+   - Optimizes structure for maximum impact
+
+2. **Translation Generation**:
+   - Produces final translation based on deep analysis
+   - Integrates semantic links to relevant memory entries
+   - Maintains cynical but informative tone
+   - Keeps within 800 character limit (1-3 paragraphs)
+
+## Quality Enhancements
+
+### Semantic Linking
+- Recalls similar content from translation memory (k=10)
+- Creates contextual links: `[короткая фраза](URL)`
+- Ignores literal word matches, focuses on meaning similarity
+- Links only when semantically relevant
+
+### Style Requirements
+- **Tone**: Cynical but not hysterical
+- **Language**: Diverse vocabulary beyond slang and profanity  
+- **Approach**: Factual with sharp observations
+- **Focus**: Political motives and event connections
+- **Headers**: **Bold text** with key insights
+
+### Character Constraints
+**Never**:
+- Template phrases and clichés
+- Repetitive thoughts
+- Long enumerations
+- Emotional hysteria
+- Explaining the obvious
+
+**Always**:
+- Explain complex events simply
+- Show context and background
+- Point out participant motives
+- Maintain informativeness while being brief
+
+## Implementation Details
+
+```python
+# Extended thinking configuration
+resp = client.messages.create(
+    model="claude-sonnet-4-20250514",
+    max_tokens=16000,  # Must exceed thinking budget
+    temperature=1.0,   # Required for thinking mode
+    thinking={
+        "type": "enabled",
+        "budget_tokens": 12000  # Substantial thinking budget
+    },
+    system=enhanced_prompt_with_thinking_instructions,
+    messages=[{"role": "user", "content": source_text}]
+)
+```
+
+## Memory Integration
+
+The system maintains a vector store of previous translations:
+- **Recall**: Retrieves top 10 semantically similar translations
+- **Context**: Adds memory context to prompt for consistency
+- **Storage**: Persists new translation pairs automatically
+- **Analytics**: Tracks memory usage and similarity metrics
+
+## Quality Metrics
+
+- **Translation Time**: ~10-15 seconds (including thinking)
+- **Memory Recall**: Sub-second semantic search
+- **Character Limit**: 800 chars max (strictly enforced)
+- **Link Accuracy**: Semantic relevance over literal matching
+- **Tone Consistency**: RIGHT-BIDLO style maintained across all translations

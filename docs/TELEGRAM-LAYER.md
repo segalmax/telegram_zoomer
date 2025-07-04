@@ -1,110 +1,139 @@
 # 📡 Telegram Integration Layer
 
-## 🎯 Core Design
+## 🎯 Architecture
 Event-driven message processing with database-backed session persistence
 
-## 🔄 Event Flow Architecture
+## 🔄 Event Flow
 
 ```mermaid
-graph TD
-    TG[Telegram Message] --> EVENT[Event Handler]
-    EVENT --> VALIDATE[Validate Source]
-    VALIDATE --> EXTRACT[Extract URLs]
-    EXTRACT --> PROCESS[Process Message]
-    PROCESS --> TRANSLATE[Translation Pipeline]
-    TRANSLATE --> POST[Post to Destination]
+sequenceDiagram
+    participant TG as Telegram
+    participant BOT as Bot Handler
+    participant VEC as Vector Store
+    participant AI as Claude API
+    
+    TG->>BOT: New message event
+    BOT->>BOT: Extract URLs/content
+    BOT->>VEC: Query memory (k=10)
+    VEC-->>BOT: Similar translations
+    BOT->>AI: Translate with context
+    AI-->>BOT: Translation + links
+    BOT->>TG: Post to destination
+    BOT->>VEC: Store new memory
 ```
 
-### Event Handler ([`app/bot.py:300`](../app/bot.py#L300))
+## 📱 Session Management
+
+### Database-Backed Sessions
+```python
+# Session persistence strategy
+class DatabaseSession:
+    def save_session(self, session_string):
+        compressed = gzip.compress(session_string.encode())
+        encoded = base64.b64encode(compressed).decode()
+        # Store in telegram_sessions table
+        
+    def load_session(self):
+        # Retrieve and decompress from database
+        return StringSession(decompressed_session)
+```
+
+### Environment Isolation
+| Environment | Session Name | Use Case |
+|-------------|--------------|----------|
+| **local** | `local_bot_session` | Development |
+| **production** | `heroku_bot_session` | Live bot |
+| **test** | `test_session` | Automated tests |
+
+## 🎛️ Event Handlers
+
+### Message Processing
 ```python
 @client.on(events.NewMessage(chats=SRC_CHANNEL))
 async def handle_new_message(event):
-    # Real-time processing, no polling
+    # Extract content and URLs
+    # Query translation memory
+    # Call AI translation
+    # Post to destination channel
+    # Store translation memory
 ```
 
-## 🗄️ Session Design
+### Error Handling
+- **Session recovery**: Auto-reconnect on auth failures
+- **Rate limiting**: Built-in Telegram API respect
+- **Network failures**: Retry with exponential backoff
 
-### Database-Backed Sessions
-- **Why database?** → Heroku ephemeral filesystem loses local files
-- **Compression** → gzip + base64 for storage efficiency  
-- **Environment isolation** → separate sessions for local/test/production
+## 📡 Channel Configuration
 
-### Session Architecture ([`app/session_manager.py:50`](../app/session_manager.py#L50))
-
-```mermaid
-graph LR
-    CLIENT[Telegram Client] --> AUTH[Authentication]
-    AUTH --> COMPRESS[Compress Session]
-    COMPRESS --> DB[(Supabase)]
-    DB --> LOAD[Load on Restart]
-    LOAD --> CLIENT
-```
-
-### Session Strategy
-| Environment | Session Name | Purpose |
-|-------------|--------------|---------|
-| **Local** | `local_bot_session` | Development work |
-| **Production** | `heroku_bot_session` | Live bot |
-| **Test** | `test_session` | Isolated testing |
-
-## 📨 Message Processing Flow
-
-### Processing Pipeline ([`app/bot.py:180`](../app/bot.py#L180))
-1. **Event received** → New message from source channel
-2. **URL detection** → Extract article links if present
-3. **Content extraction** → Fetch full article text
-4. **Translation trigger** → Pass to AI translation system
-5. **Result posting** → Send to destination channel
-6. **Memory storage** → Save for future context
-
-### URL Handling
-- **Detect patterns** → ynet.co.il, ynetnews.com links
-- **Extract content** → newspaper4k library
-- **Language detection** → Hebrew/English auto-detection
-- **Fallback** → Process message text if no URL
-
-
-
-## ⚡ Performance Optimizations
-
-### Event-Driven Benefits
-- **No polling delays** → immediate processing
-- **Resource efficient** → only active when needed  
-- **Reliable delivery** → Telegram push guarantees
-
-### Connection Management
-- **Keep-alive** → background connection maintenance
-- **Auto-reconnect** → handle network interruptions
-- **Session persistence** → avoid re-authentication
-
-## 🔧 Configuration
-
-### Required Environment Variables
+### Environment Variables
 ```bash
-TG_API_ID=12345678                    # Telegram API credentials
-TG_API_HASH=abcd1234...
-SRC_CHANNEL=@source_channel           # Source channel to monitor  
-DST_CHANNEL=@destination_channel      # Destination for translations
+# Main channels
+SRC_CHANNEL=@source_channel
+DST_CHANNEL=@destination_channel
+
+# Test mode (uses TEST_SRC_CHANNEL/TEST_DST_CHANNEL if set)
+TEST_MODE=true
+
+# Telegram API
+TG_API_ID=12345
+TG_API_HASH=abcdef123456
 ```
 
-### Connection Settings  
-- **Connection type** → TcpAbridged (efficient)
-- **Retry logic** → exponential backoff
-- **Timeout handling** → graceful degradation
-
-## 🚨 Error Handling
-
-### Critical Scenarios
-- **AuthKeyDuplicatedError** → Use separate test sessions
-
-- **Network interruptions** → Automatic reconnection
-- **Flood limits** → Respect Telegram rate limits
-
-### Session Recovery
+### Session Selection Logic
 ```python
-# Auto-recovery on session issues
-if session_invalid:
-    reset_session()
-    re_authenticate()
-    save_session_after_auth()
+def setup_session():
+    is_test = os.getenv('TEST_MODE') == 'true'
+    is_heroku = os.getenv('DYNO') is not None
+    
+    if is_test:
+        return load_session("test_session", "test")
+    elif is_heroku:
+        return load_session("heroku_bot_session", "production")
+    else:
+        return load_session("local_bot_session", "local")
+```
+
+## 🔧 Message Processing
+
+### Content Extraction
+```python
+# URL extraction from message entities
+urls = [entity.url for entity in event.message.entities 
+        if hasattr(entity, 'url')]
+
+# Article extraction for context
+if urls:
+    article_text = extract_article(urls[0])
+    context += f"\n\nArticle: {article_text}"
+```
+
+### Link Formatting
+```python
+# Source attribution
+source_link = f"https://t.me/{SRC_CHANNEL.replace('@', '')}/{message_id}"
+footer = f"\n\n🔗 [Оригинал:]({source_link})"
+
+if article_urls:
+    footer += f"\n🔗 [Ссылка из статьи]({article_urls[0]})"
+```
+
+## ⚡ Performance Features
+
+### Real-Time Processing
+- **Event-driven**: No polling overhead
+- **Async operations**: Non-blocking I/O
+- **Single-pass**: Unified translate+link
+
+### Reliability
+- **Stateless design**: Survives Heroku restarts
+- **Database persistence**: No local state loss
+- **Connection pooling**: Efficient resource usage
+
+## 🧪 Test Integration
+```python
+# Test mode configuration
+if TEST_MODE:
+    # Use separate test channels and sessions
+    # Isolated from production data
+    # Uses TG_SENDER_COMPRESSED_SESSION_STRING
 ``` 

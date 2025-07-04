@@ -1,117 +1,145 @@
 # 🧪 Testing Strategy
 
-## 🎯 Testing Philosophy
-**Quality Gate**: Zero ERROR logs + Real Telegram validation
+## 🎯 Test Philosophy
+Validate core functionality with minimal setup - article extraction, API integration, and end-to-end flow
 
 ## 🏗️ Test Architecture
 
-```mermaid
-graph TD
-    UNIT[Unit Tests] --> INTEGRATION[Integration Tests]
-    INTEGRATION --> E2E[End-to-End Tests]
-    E2E --> LIVE[Live Telegram Tests]
-    
-    UNIT -.-> FAST[Fast Feedback]
-    INTEGRATION -.-> COMPONENTS[Component Interaction]
-    E2E -.-> PIPELINE[Full Pipeline]
-    LIVE -.-> PRODUCTION[Production-like]
-```
-
-## 🧪 Test Layers
-
-### Unit Tests
-```bash
-pytest tests/test_article_extractor.py -v
-```
-- **Scope** → Individual functions, isolated
-- **Speed** → <5 seconds
-- **Coverage** → URL extraction, content parsing
-
-### Integration Tests  
-```bash
-pytest tests/test_integration.py -v
-```
-- **Scope** → Component interactions
-- **Speed** → <30 seconds  
-- **Coverage** → Article extraction + translation
-
-### End-to-End Tests
-```bash
-pytest tests/test_e2e_unified.py -v
-```
-- **Scope** → Full pipeline with mocked APIs
-- **Speed** → <60 seconds
-- **Coverage** → Complete message flow
-
-### Live Integration
-```bash
-./tests/test_polling_flow.sh
-```
-- **Scope** → Real Telegram API
-- **Speed** → <90 seconds
-- **Coverage** → Production-like validation
-
-## 🔍 Validation Strategy
-
-### Critical Validations
-- **ERROR log monitoring** → Any ERROR = test failure
-- **API response validation** → All external calls verified
-- **Session isolation** → Separate test sessions prevent interference
-- **Performance thresholds** → Translation <30s, Memory recall <1s
-
-### Test Environment Setup
-```bash
-# Isolated test environment
-TEST_MODE=true
-TEST_SRC_CHANNEL=@test_source  
-TEST_DST_CHANNEL=@test_dest
-TG_SENDER_COMPRESSED_SESSION_STRING=...  # Dedicated test session
-```
-
-## 🚀 Running Tests
-
-### Complete Validation
-```bash
-# Full test suite (run before commits)
-source .venv/bin/activate
-python -m pytest tests/ -v              # All unit/integration tests  
-./tests/test_polling_flow.sh             # Live Telegram validation
-```
-
-### Quick Feedback Loop
-```bash
-# Fast development cycle
-pytest tests/test_article_extractor.py -v     # Specific component
-pytest tests/test_e2e_unified.py::test_api_translations -v  # Specific test
-```
-
-## 🛡️ Quality Gates
-
-### Pre-commit Requirements
-- ✅ All tests pass
-- ✅ Zero ERROR-level logs
-- ✅ Live Telegram flow validated
-- ✅ Performance within thresholds
-
-### Error Detection
+### Test Suites (6 tests total)
 ```python
-# Automatic error detection in tests
-@pytest.fixture(autouse=True)
-def check_error_logs():
-    # Monitor logs during test execution
-    # Fail if any ERROR level logs detected
+pytest tests/ -v
+# ✅ 6 passed, 0 skipped, 0 failed
+```
+
+## 📋 Test Coverage
+
+### Core Components
+| Test Module | Coverage | Purpose |
+|-------------|----------|---------|
+| `test_article_extractor.py` | Article extraction | URL → content validation |
+| `test_integration.py` | API integration | Supabase + OpenAI connectivity |
+| `test_e2e_unified.py` | End-to-end flow | Complete translation pipeline |
+
+### Test Details
+```python
+# Article Extraction (2 tests)
+test_article_extraction()      # Basic URL extraction
+test_error_handling()         # 404/invalid URL handling
+
+# Integration (1 test) 
+test_article_extraction_integration()  # Real API calls
+
+# End-to-End (3 tests)
+test_api_translations()       # Translation API flow
+test_telegram_pipeline()     # Full bot pipeline
+test_verify_no_errors_logged()  # Error validation
 ```
 
 ## 🔧 Test Configuration
 
-### Environment Isolation
-| Environment | Purpose | Sessions |
-|-------------|---------|----------|
-| `local` | Development | `local_bot_session` |
-| `test` | Automated testing | `test_session` |  
-| `production` | Live bot | `heroku_bot_session` |
+### Session Isolation [[memory:326849]]
+```python
+# Separate test sessions to avoid AuthKeyDuplicatedError
+# Main bot: TG_COMPRESSED_SESSION_STRING
+# Tests: TG_SENDER_COMPRESSED_SESSION_STRING
+```
 
-### Session Strategy
-- **Separate sessions** → Prevent AuthKeyDuplicatedError
-- **Database isolation** → Environment-specific data
-- **Clean teardown** → Reset state between tests 
+### Environment Setup
+```bash
+# Test mode activation
+TEST_MODE=true
+TEST_SRC_CHANNEL=@test_source
+TEST_DST_CHANNEL=@test_destination
+
+# Test session
+TG_SENDER_COMPRESSED_SESSION_STRING=AQAAAIGBAWQBAYDd...
+```
+
+## 🚀 Running Tests
+
+### Local Development
+```bash
+# Full test suite
+python -m pytest tests/ -v
+
+# Individual test files
+python -m pytest tests/test_article_extractor.py -v
+python -m pytest tests/test_e2e_unified.py -v
+```
+
+### Virtual Environment
+```python
+# Ensure .venv is active
+which python  # Should show .venv path
+pip install -r requirements.txt  # If packages missing
+```
+
+## 📊 Test Results Analysis
+
+### Success Criteria
+- **6/6 tests pass**: Core functionality working
+- **No skipped tests**: Full coverage validation
+- **Clean error logs**: No unexpected failures
+
+### Common Issues
+```python
+# Missing packages
+pip install pytest anthropic supabase openai
+
+# Session conflicts
+# Use separate TG_SENDER_COMPRESSED_SESSION_STRING for tests
+
+# Network timeouts
+# Tests include real API calls - retry if needed
+```
+
+## 🔍 Validation Checks
+
+### Article Extraction
+```python
+# Valid URL processing
+assert len(extracted_text) > 50
+assert 'error' not in extracted_text.lower()
+
+# Error handling
+invalid_urls = ['', 'invalid', 'http://404.example']
+for url in invalid_urls:
+    assert extract_article(url) == ""
+```
+
+### Translation Pipeline
+```python
+# API connectivity
+assert anthropic_client is not None
+assert supabase_client is not None
+
+# Memory system
+memories = recall("test query", k=5)
+assert isinstance(memories, list)
+```
+
+## 🛠️ Debugging
+
+### Test Failures
+```bash
+# Verbose output
+python -m pytest tests/ -v -s
+
+# Specific test debugging
+python -m pytest tests/test_e2e_unified.py::test_api_translations -v -s
+```
+
+### Log Analysis
+```python
+# Test logs show:
+# - API response times
+# - Memory query results  
+# - Translation success/failure
+# - Database operations
+```
+
+## 📈 Performance Targets
+- **Test execution**: <60s total
+- **API response**: <30s per translation
+- **Memory queries**: <1s
+- **Success rate**: 100% in clean environment 

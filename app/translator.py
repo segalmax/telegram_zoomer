@@ -34,8 +34,18 @@ def make_linking_prompt(mem):
     memory_list = memory_block(mem) if mem else "Нет предыдущих постов."
     
     return f"""<role>
-Ты ведёшь канал в стиле RIGHT-BIDLO — умный циник, который понимает механику власти и пропаганды, видит связи между событиями, не дает себя наебать красивыми словами.
+Ты ведёшь канал в стиле Lurkmore — умный циник, который понимает механику власти и пропаганды, видит связи между событиями, не дает себя наебать красивыми словами.
 </role>
+
+<thinking_instructions>
+Перед переводом проанализируй:
+1. Основную мысль и скрытые мотивы в тексте
+2. Ключевые термины и их лучшие эквиваленты в русском
+3. Тональность и стилистику оригинала
+4. Связи с предыдущими постами из памяти
+5. Наиболее точные и едкие формулировки для RIGHT-BIDLO стиля
+6. Оптимальную структуру для максимального воздействия
+</thinking_instructions>
 
 <task>
 1. ПЕРЕВЕДИ входной текст в стиле RIGHT-BIDLO
@@ -116,28 +126,42 @@ async def translate_and_link(client, src_text, mem):
         log_text = src_text[:100] + "..." if len(src_text) > 100 else src_text
         logger.info(f"Text to translate+link (truncated): {log_text}")
         
-        # Make the API call to Claude Sonnet 4
-        logger.info(f"Sending request to Anthropic API using model: claude-sonnet-4-20250514")
+        # Make the API call to Claude Sonnet 4 with extended thinking for maximum quality
+        logger.info(f"Sending request to Anthropic API using model: claude-sonnet-4-20250514 with extended thinking")
         api_start = time.time()
         resp = client.messages.create(
             model="claude-sonnet-4-20250514",  # Using latest Claude Sonnet 4
-            max_tokens=1000,
-            temperature=0.85,  # Higher temperature for more creative and daring output
+            max_tokens=16000,  # Must be greater than thinking budget_tokens (12000)
+            temperature=1.0,  # Must be 1.0 when thinking is enabled
+            thinking={
+                "type": "enabled",
+                "budget_tokens": 12000  # Substantial thinking budget for complex translation analysis
+            },
             system=prompt,
             messages=[
                 {"role": "user", "content": src_text}
             ]
         )
         api_time = time.time() - api_start
-        logger.info(f"Anthropic API call completed in {api_time:.2f} seconds")
+        logger.info(f"Anthropic API call with extended thinking completed in {api_time:.2f} seconds")
         
-        # Extract and return the result
-        result = resp.content[0].text.strip()
+        # Extract and return the result (we only want the final text, not the thinking)
+        # With thinking mode, response contains both thinking blocks and text blocks
+        result = None
+        for content_block in resp.content:
+            if hasattr(content_block, 'text') and content_block.text:
+                result = content_block.text.strip()
+                break
+        
+        if not result:
+            logger.error("No text content found in API response")
+            raise ValueError("No text content found in API response")
+        
         total_time = time.time() - start_time
         
         result_snippet = result[:100] + "..." if len(result) > 100 else result
         logger.info(f"Translation+linking result (truncated): {result_snippet}")
-        logger.info(f"Translation+linking completed in {total_time:.2f} seconds")
+        logger.info(f"Translation+linking with extended thinking completed in {total_time:.2f} seconds")
         
         # Validate result contains Russian characters
         has_russian = any(ord('а') <= ord(c) <= ord('я') or ord('А') <= ord(c) <= ord('Я') for c in result)

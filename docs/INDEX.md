@@ -1,38 +1,25 @@
-# 📚 Documentation Navigator
+# 📚 Telegram Zoomer Bot - Documentation
 
-## 🎯 Start Here
+## 🎯 Architecture Overview
+Event-driven Telegram bot that translates news into Russian zoomer slang with AI-powered context linking.
+
+## 🔍 Core Components (2-min each)
 ```
-📖 Project Overview          → ../README.md
 🏗️ System Design            → SYSTEM-DESIGN.md
-```
-
-## 🔍 Understand Components (5-min each)
-```
-📡 Telegram Integration      → TELEGRAM-LAYER.md
-   ├── Event-driven flow
-   ├── Session management
-   └── Message processing
-
+💾 Data Architecture        → DATA-ARCHITECTURE.md  
 🧠 AI Translation           → AI-TRANSLATION.md
-   ├── Prompting technique
-   ├── Memory integration  
-   └── Linking mechanism
-
-💾 Data Architecture        → DATA-ARCHITECTURE.md
-   ├── Database design
-   ├── Vector storage
-   └── Persistence strategy
+📡 Telegram Layer           → TELEGRAM-LAYER.md
 ```
 
-## 🛠️ Implementation
+## 🛠️ Operations
 ```
 🧪 Testing Strategy         → TESTING-STRATEGY.md
-🚀 Deployment Architecture  → DEPLOYMENT-ARCHITECTURE.md
+🚀 Deployment              → DEPLOYMENT-ARCHITECTURE.md
 ```
 
-## 💡 Quick Lookup
-- **Need to understand linking?** → AI-TRANSLATION.md#linking-mechanism
-- **Session persistence?** → TELEGRAM-LAYER.md#session-design  
-- **Database tables?** → DATA-ARCHITECTURE.md#tables
-- **How to test changes?** → TESTING-STRATEGY.md#validation
-- **Deploy to production?** → DEPLOYMENT-ARCHITECTURE.md#heroku 
+## 💡 Quick Reference
+- **How it works?** → SYSTEM-DESIGN.md#main-flow
+- **Database tables?** → DATA-ARCHITECTURE.md#core-tables
+- **Memory system?** → AI-TRANSLATION.md#translation-memory
+- **Run tests?** → `python -m pytest tests/ -v` (6 tests should pass)
+- **Deploy?** → DEPLOYMENT-ARCHITECTURE.md#heroku-deploy
