@@ -255,3 +255,357 @@ The system maintains a vector store of previous translations:
 - **Character Limit**: 800 chars max (strictly enforced)
 - **Link Accuracy**: Semantic relevance over literal matching
 - **Tone Consistency**: RIGHT-BIDLO style maintained across all translations
+
+# AI Translation System Architecture
+
+## System Overview
+
+The Telegram Zoomer Bot implements a sophisticated AI translation pipeline using **Claude Sonnet 4 with extended thinking** for maximum quality translations into RIGHT-BIDLO style for Israeli Russian audiences.
+
+## Core Components Architecture
+
+```mermaid
+graph TB
+    subgraph "External Services"
+        TG[Telegram API]
+        CLAUDE[Anthropic Claude API<br/>Sonnet 4 + Extended Thinking]
+        PG[(PostgreSQL Database)]
+    end
+    
+    subgraph "Bot Core"
+        BOT[Bot Handler<br/>app/bot.py]
+        TRANS[Translator<br/>app/translator.py]
+        EXTRACT[Article Extractor<br/>app/article_extractor.py]
+        SESSION[Session Manager<br/>app/session_manager.py]
+    end
+    
+    subgraph "Data Layer"
+        VECTOR[Vector Store<br/>app/vector_store.py]
+        ANALYTICS[Analytics<br/>app/analytics.py]
+    end
+    
+    subgraph "Database Tables"
+        CHUNKS[article_chunks<br/>Translation Memory]
+        SESSIONS[translation_sessions<br/>Analytics Data]
+        MEMORY[memory_usage_analytics<br/>Memory Tracking]
+        TG_SESS[telegram_sessions<br/>Session Persistence]
+    end
+    
+    TG --> BOT
+    BOT --> TRANS
+    BOT --> EXTRACT
+    BOT --> SESSION
+    TRANS --> CLAUDE
+    TRANS --> VECTOR
+    VECTOR --> PG
+    ANALYTICS --> PG
+    SESSION --> PG
+    
+    VECTOR --> CHUNKS
+    ANALYTICS --> SESSIONS
+    ANALYTICS --> MEMORY
+    SESSION --> TG_SESS
+```
+
+## Extended Thinking Translation Flow
+
+```mermaid
+sequenceDiagram
+    participant SRC as Source Channel
+    participant BOT as Bot Handler
+    participant VEC as Vector Store
+    participant EXT as Article Extractor
+    participant TRA as Translator
+    participant CLA as Claude Sonnet 4
+    participant ANA as Analytics
+    participant DST as Destination Channel
+    participant DB as PostgreSQL
+
+    SRC->>BOT: New Message Event
+    BOT->>ANA: Start Analytics Session
+    BOT->>VEC: Query Translation Memory (k=10)
+    VEC->>DB: Vector Similarity Search
+    DB-->>VEC: Relevant Past Translations
+    VEC-->>BOT: Memory Context
+    
+    alt Message Contains URLs
+        BOT->>EXT: Extract Article Content
+        EXT-->>BOT: Article Text
+    end
+    
+    BOT->>TRA: Translate with Memory + Article
+    TRA->>CLA: Extended Thinking Request<br/>12k thinking budget
+    
+    Note over CLA: Extended Thinking Process:<br/>1. Analyze source meaning & motives<br/>2. Find optimal Russian<br/>Equivalents & Slang<br/>3. Study Memory Context<br/>for Past Translations<br/>4. Identify Repetitive<br/>Phrases to Avoid<br/>5. Plan RIGHT-BIDLO<br/>Cynical Formulations<br/>6. Structure for Maximum<br/>Information + Impact<br/>7. Generate Semantic<br/>Link Strategy
+    
+    CLA-->>TRA: Thinking + Translation Result
+    TRA-->>BOT: Final Translation with Links
+    BOT->>DST: Post Translation
+    BOT->>VEC: Store Translation Pair
+    VEC->>DB: Save to article_chunks
+    BOT->>ANA: Track Metrics & End Session
+    ANA->>DB: Save Analytics
+```
+
+## Extended Thinking Deep Dive
+
+```mermaid
+flowchart TD
+    INPUT[Source Text + Memory Context] --> THINKING[Claude Extended Thinking<br/>12,000 Token Budget]
+    
+    subgraph THINKING_PROCESS["Extended Thinking Analysis"]
+        A1[1. Analyze Real Motives<br/>Behind Official Narrative]
+        A2[2. Find Optimal Russian<br/>Equivalents & Slang]
+        A3[3. Study Memory Context<br/>for Past Translations]
+        A4[4. Identify Repetitive<br/>Phrases to Avoid]
+        A5[5. Plan RIGHT-BIDLO<br/>Cynical Formulations]
+        A6[6. Structure for Maximum<br/>Information + Impact]
+        A7[7. Generate Semantic<br/>Link Strategy]
+        
+        A1 --> A2 --> A3 --> A4 --> A5 --> A6 --> A7
+    end
+    
+    THINKING --> VALIDATION{Quality Check}
+    VALIDATION -->|Pass| OUTPUT[Final Translation<br/>with Semantic Links]
+    VALIDATION -->|Fail| ERROR[API Error<br/>Fail Fast]
+    
+    OUTPUT --> POST[Post to Channel]
+    ERROR --> STOP[Stop Processing]
+```
+
+## Memory System & Anti-Repetition
+
+```mermaid
+graph LR
+    subgraph "Translation Memory Flow"
+        QUERY[New Translation Request]
+        SEARCH[Vector Similarity Search]
+        CONTEXT[Memory Context Assembly]
+        ANALYSIS[Anti-Repetition Analysis]
+        FRESH[Generate Fresh Content]
+        STORE[Store New Translation]
+    end
+    
+    subgraph "Database Layer"
+        EMBED[Text Embeddings]
+        CHUNKS[(article_chunks)]
+        INDEX[Vector Index]
+    end
+    
+    QUERY --> SEARCH
+    SEARCH --> EMBED
+    EMBED --> CHUNKS
+    CHUNKS --> INDEX
+    INDEX --> CONTEXT
+    CONTEXT --> ANALYSIS
+    
+    ANALYSIS --> FRESH
+    FRESH --> STORE
+    STORE --> CHUNKS
+    
+    subgraph "Anti-Repetition Logic"
+        EXTRACT[Extract All Past Phrases]
+        FORBID[Forbid Exact Matches]
+        INNOVATE[Force Innovation]
+    end
+    
+    ANALYSIS --> EXTRACT
+    EXTRACT --> FORBID
+    FORBID --> INNOVATE
+    INNOVATE --> FRESH
+```
+
+## Analytics & Performance Tracking
+
+```mermaid
+graph TB
+    subgraph "Analytics Flow"
+        START[Session Start]
+        MEMORY_METRICS[Memory Query Metrics]
+        TRANSLATION_METRICS[Translation Metrics]
+        PERFORMANCE[Performance Tracking]
+        END[Session End]
+    end
+    
+    subgraph "Tracked Metrics"
+        TIME[Processing Time]
+        MEMORY_TIME[Memory Query Time]
+        TRANSLATION_TIME[Translation + Thinking Time]
+        MEMORY_COUNT[Memory Results Count]
+        SIMILARITY[Similarity Scores]
+        ERRORS[Error Tracking]
+    end
+    
+    subgraph "Database Storage"
+        SESSIONS[(translation_sessions)]
+        MEMORY_ANALYTICS[(memory_usage_analytics)]
+    end
+    
+    START --> MEMORY_METRICS
+    MEMORY_METRICS --> TRANSLATION_METRICS
+    TRANSLATION_METRICS --> PERFORMANCE
+    PERFORMANCE --> END
+    
+    MEMORY_METRICS --> TIME
+    MEMORY_METRICS --> MEMORY_TIME
+    MEMORY_METRICS --> MEMORY_COUNT
+    MEMORY_METRICS --> SIMILARITY
+    
+    TRANSLATION_METRICS --> TRANSLATION_TIME
+    PERFORMANCE --> ERRORS
+    
+    END --> SESSIONS
+    END --> MEMORY_ANALYTICS
+```
+
+## API Configuration & Constraints
+
+```mermaid
+graph LR
+    subgraph "Claude API Configuration"
+        MODEL[claude-sonnet-4-20250514]
+        THINKING[thinking.type: enabled<br/>thinking.budget_tokens: 12000]
+        TOKENS[max_tokens: 16000]
+        TEMP[temperature: 1.0<br/>Required for thinking mode]
+    end
+    
+    subgraph "Constraints"
+        C1[max_tokens > budget_tokens<br/>16000 > 12000 ✓]
+        C2[temperature = 1.0<br/>when thinking enabled]
+        C3[fail_fast = true<br/>no fallbacks]
+    end
+    
+    MODEL --> THINKING
+    THINKING --> TOKENS
+    TOKENS --> TEMP
+    
+    TOKENS --> C1
+    TEMP --> C2
+    THINKING --> C3
+    
+    subgraph "Response Processing"
+        RESP[API Response]
+        EXTRACT[Extract Text Block<br/>Skip Thinking Block]
+        VALIDATE[Validate Result]
+        FAIL[Fail if No Text]
+    end
+    
+    TEMP --> RESP
+    RESP --> EXTRACT
+    EXTRACT --> VALIDATE
+    VALIDATE --> FAIL
+```
+
+## Translation Style Engine
+
+```mermaid
+flowchart TD
+    subgraph "Style Configuration"
+        AUDIENCE[Israeli Russian Audience]
+        TONE[RIGHT-BIDLO Cynical Tone]
+        ANTI_REPEAT[Anti-Repetition Engine]
+    end
+    
+    subgraph "Style Rules"
+        HONEST[Brutal Honesty<br/>No Diplomatic Language]
+        CYNICAL[See Through Propaganda<br/>Expose Real Motives]
+        FRESH[Fresh Formulations<br/>Zero Repetition Tolerance]
+        LINKS[Semantic Memory Links<br/>1-3 per translation]
+    end
+    
+    subgraph "Quality Enforcement"
+        RUSSIAN[Must Contain Russian Text]
+        LENGTH[1-3 Paragraphs Max<br/>≤800 characters]
+        ORIGINAL[100% Original Phrasing<br/>vs Memory Analysis]
+    end
+    
+    AUDIENCE --> HONEST
+    TONE --> CYNICAL
+    ANTI_REPEAT --> FRESH
+    
+    HONEST --> RUSSIAN
+    CYNICAL --> LENGTH
+    FRESH --> ORIGINAL
+    
+    RUSSIAN --> LINKS
+    LENGTH --> LINKS
+    ORIGINAL --> LINKS
+```
+
+## Error Handling & Resilience
+
+```mermaid
+graph TB
+    subgraph "Error Sources"
+        API_ERROR[Anthropic API Error]
+        MEMORY_ERROR[Vector Store Error]
+        DB_ERROR[Database Error]
+        NETWORK_ERROR[Network Timeout]
+    end
+    
+    subgraph "Resilience Strategies"
+        RETRY[Tenacity Retry<br/>3 attempts + backoff]
+        FAIL_FAST[Immediate Failure<br/>No Fallbacks]
+        LOGGING[Comprehensive Logging<br/>Error Context]
+        ANALYTICS[Error Analytics<br/>Tracking]
+    end
+    
+    subgraph "Monitoring"
+        METRICS[Performance Metrics]
+        ALERTS[Error Rate Monitoring]
+        QUALITY[Translation Quality Check]
+    end
+    
+    API_ERROR --> RETRY
+    MEMORY_ERROR --> FAIL_FAST
+    DB_ERROR --> LOGGING
+    NETWORK_ERROR --> ANALYTICS
+    
+    RETRY --> METRICS
+    FAIL_FAST --> ALERTS
+    LOGGING --> QUALITY
+    ANALYTICS --> QUALITY
+```
+
+## Production Deployment Flow
+
+```mermaid
+sequenceDiagram
+    participant DEV as Development
+    participant GIT as GitHub
+    participant HEROKU as Heroku Production
+    participant TG as Telegram
+    participant USERS as Users
+
+    DEV->>GIT: git push origin main
+    GIT->>HEROKU: Auto-deploy trigger
+    HEROKU->>HEROKU: Build with requirements.txt<br/>anthropic==0.57.1
+    HEROKU->>HEROKU: Start dyno with extended thinking
+    HEROKU->>TG: Connect to Telegram API
+    TG->>HEROKU: Route messages to bot
+    HEROKU->>USERS: Deliver high-quality translations<br/>with 12k thinking budget
+    
+    Note over HEROKU: Production Environment:<br/>- Claude Sonnet 4 Extended Thinking<br/>- 12,000 token thinking budget<br/>- Fail-fast error handling<br/>- Full analytics tracking
+```
+
+## Performance Characteristics
+
+| Metric | Value | Notes |
+|--------|--------|-------|
+| **Thinking Budget** | 12,000 tokens | Deep analysis before translation |
+| **Max Response** | 16,000 tokens | Thinking + output combined |
+| **Translation Time** | 10-15 seconds | Including extended thinking |
+| **Memory Query** | <1 second | Vector similarity search |
+| **Retry Strategy** | 3 attempts | Exponential backoff |
+| **Temperature** | 1.0 | Required for thinking mode |
+| **Memory Context** | k=10 results | Past translation analysis |
+
+## Quality Guarantees
+
+✅ **Anti-Repetition**: Zero tolerance for phrase repetition vs memory  
+✅ **Extended Thinking**: 12k token budget for deep analysis  
+✅ **Fail-Fast**: Immediate failure on errors, no compromises  
+✅ **Style Consistency**: RIGHT-BIDLO cynical tone maintained  
+✅ **Semantic Links**: Memory-based contextual connections  
+✅ **Performance Tracking**: Full analytics on all operations  
+✅ **Production Ready**: Deployed with comprehensive monitoring
