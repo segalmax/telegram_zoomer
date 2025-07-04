@@ -92,11 +92,11 @@ async def test_api_translations(test_args):
     """Test translation functionality with Anthropic Claude."""
     client = get_anthropic_client(ANTHROPIC_KEY)
     assert client, "Anthropic client could not be initialized. Check ANTHROPIC_API_KEY."
-    logger.info("Testing RIGHT-BIDLO style translation...")
+    logger.info("Testing modern Lurkmore style translation for Israeli Russian audience...")
     # Use new semantic linking approach with empty memory for this test
     translation_result = await translate_and_link(client, TEST_MESSAGE, [])
-    assert translation_result and len(translation_result) > 10, "RIGHT-BIDLO translation failed or returned empty/short result"
-    logger.info(f"RIGHT-BIDLO translation successful: {translation_result[:100]}...")
+    assert translation_result and len(translation_result) > 10, "Modern Lurkmore style translation failed or returned empty/short result"
+    logger.info(f"Modern Lurkmore style translation successful: {translation_result[:100]}...")
 
 
 async def verify_message_in_channel(client, channel, content_fragment, timeout=300, limit=10):

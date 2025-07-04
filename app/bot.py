@@ -201,8 +201,8 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
                 translation_context += f"\n\nNote: This message contains a link: {message_entity_urls[0]}"
                 logger.info("Article extraction failed, using fallback link mention")
         
-        # Always use right-bidlo style (only style supported)
-        logger.info("Translating in RIGHT-BIDLO style with semantic linking...")
+        # Always use modern Lurkmore style for Israeli Russian audience (only style supported)
+        logger.info("Translating in modern Lurkmore style for Israeli Russian audience with semantic linking...")
         translation_start = time.time()
         linked_text = await translate_and_link(anthropic_client, translation_context, memory)
         translation_time_ms = int((time.time() - translation_start) * 1000)
@@ -221,7 +221,7 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
         right_content = f"{invisible_article_link}{linked_text}{source_footer}"
         logger.info(f"📝 Final post content preview: {right_content[:200]}...")
         sent_message = await send_message_parts(dst_channel_to_use, right_content)
-        logger.info(f"Posted right-bidlo version")
+        logger.info(f"Posted modern Lurkmore style version")
         
         # Persist pair in translation memory (best-effort) 
         save_start_time = time.time()

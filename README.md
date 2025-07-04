@@ -35,7 +35,7 @@ python app/bot.py --process-recent 1          # Test with last post
 1. **Listens** → Source Telegram channel for new messages
 2. **Extracts** → Full article content if URLs present
 3. **Recalls** → Similar past translations for context (semantic memory)
-4. **Translates** → Claude Sonnet 4 with RIGHT-BIDLO style + context linking
+4. **Translates** → Claude Sonnet 4 with modern Lurkmore style for Israeli Russian audience + context linking
 5. **Posts** → Result to destination channel with embedded related links
 
 ## 🏗️ Key Features
