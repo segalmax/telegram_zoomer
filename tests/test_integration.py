@@ -82,7 +82,7 @@ async def test_article_extraction_integration():
         
         client = get_anthropic_client(api_key)
         # Test with memories that should trigger semantic links
-        translated = await translate_and_link(client, translation_context, test_memories)
+        translated, conversation_log = await translate_and_link(client, translation_context, test_memories)
         
         print(f"\n=== Translation with Linking Result ===")
         print(f"Translated text length: {len(translated)} characters")

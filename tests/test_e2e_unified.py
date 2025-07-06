@@ -94,9 +94,11 @@ async def test_api_translations(test_args):
     assert client, "Anthropic client could not be initialized. Check ANTHROPIC_API_KEY."
     logger.info("Testing modern Lurkmore style translation for Israeli Russian audience...")
     # Use new semantic linking approach with empty memory for this test
-    translation_result = await translate_and_link(client, TEST_MESSAGE, [])
+    translation_result, conversation_log = await translate_and_link(client, TEST_MESSAGE, [])
     assert translation_result and len(translation_result) > 10, "Modern Lurkmore style translation failed or returned empty/short result"
+    assert conversation_log and len(conversation_log) > 0, "Editorial conversation log should not be empty"
     logger.info(f"Modern Lurkmore style translation successful: {translation_result[:100]}...")
+    logger.info(f"Editorial conversation log captured: {len(conversation_log)} characters")
 
 
 async def verify_message_in_channel(client, channel, content_fragment, timeout=300, limit=10):

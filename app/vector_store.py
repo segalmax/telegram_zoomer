@@ -79,7 +79,8 @@ def save_pair(
     pair_id: str | None = None,
     message_id: int | None = None,
     channel_name: str | None = None,
-    message_url: str | None = None
+    message_url: str | None = None,
+    conversation_log: str | None = None
 ) -> None:
     """Upsert one (source, translation) pair into Supabase. Fails if store unavailable or invalid input."""
     assert src, "Source text is required for save_pair"
@@ -111,6 +112,8 @@ def save_pair(
             data["channel_name"] = channel_name
         if message_url is not None:
             data["message_url"] = message_url
+        if conversation_log is not None:
+            data["conversation_log"] = conversation_log
         
         # Save to database
         db_start = time.time()

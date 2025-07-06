@@ -16,6 +16,28 @@ def get_anthropic_client(api_key):
     logger.info("Initializing Anthropic Claude client")
     return anthropic.Anthropic(api_key=api_key)
 
+def call_claude(client, system_prompt, user_message):
+    """Unified Claude API call with consistent parameters"""
+    response = client.messages.create(
+        model="claude-sonnet-4-20250514",  # Using latest Claude Sonnet 4
+        max_tokens=30000,  # Must be greater than thinking budget_tokens (12000)
+        temperature=1.0,  # Must be 1.0 when thinking is enabled
+        thinking={
+            "type": "enabled",
+            "budget_tokens": 20000  # Substantial thinking budget for complex translation analysis
+        },
+        system=system_prompt,
+        messages=[
+            {"role": "user", "content": user_message}
+        ]
+    )
+    
+    # With thinking mode enabled, find the text content (not the thinking block)
+    for block in response.content:
+        if hasattr(block, 'text'):
+            return block.text
+    
+    return response.content[-1].text
 def memory_block(mem, k=8):
     """
     Build a compact context for the LLM: numbered list of (very short) summaries
@@ -203,6 +225,92 @@ def make_linking_prompt(mem):
 Верни ТОЛЬКО готовый пост. Никаких пояснений или мета-комментариев.
 </output_format>"""
 
+class LLMEditor:
+    """Minimal LLM Editor for critiquing translations"""
+    
+    def __init__(self, client):
+        self.client = client
+        
+    def critique_translation(self, translation_text, source_text, memory_context, translator_prompt):
+        """Critique a translation for repetitions and quality against the exact translator instructions"""
+        
+        prompt = f"""Ты опытный редактор канала Lurkmore в стиле современного "Лурка" для израильской русскоязычной аудитории.
+
+КРИТИЧЕСКИ ВАЖНО: Ты должен критиковать перевод на основе ТОЧНО ТЕХ ЖЕ ИНСТРУКЦИЙ, которые получил переводчик.
+
+ИНСТРУКЦИИ ПЕРЕВОДЧИКА (которые ты должен проверить):
+{translator_prompt}
+
+ИСХОДНЫЙ ТЕКСТ: {source_text}
+
+ПЕРЕВОД ДЛЯ ПРОВЕРКИ: {translation_text}
+
+КОНТЕКСТ ПАМЯТИ: {memory_context}
+
+ТВОЯ ЗАДАЧА КАК РЕДАКТОРА:
+1. Проверь соблюдение ВСЕХ инструкций переводчика (длина, стиль, анти-повторы, ссылки)
+2. Найди нарушения конкретных правил из системного промпта
+3. Проверь качество выполнения 12-шагового мыслительного процесса
+4. Оцени соблюдение анти-повтор правил и linking rules
+5. Проверь фактическую точность и стилистические требования
+
+НАПИШИ КОНКРЕТНУЮ КРИТИКУ с указанием:
+- Какие именно инструкции нарушены
+- Конкретные примеры проблем
+- Четкие указания для исправления
+"""
+        
+        response = call_claude(self.client, "", prompt)
+        
+        return response
+
+def editorial_process(client, source_text, memory_list, max_iterations=3):
+    """Run editorial conversation between translator and editor"""
+    
+    editor = LLMEditor(client)
+    conversation_log = []
+    
+    # Initial translation
+    translator_prompt = make_linking_prompt(memory_list)
+    memory_context_str = memory_block(memory_list) if memory_list else "Нет предыдущих постов."
+    
+    current_translation = call_claude(client, translator_prompt, source_text)
+    conversation_log.append(f"ПЕРЕВОД v1: {current_translation}")
+    
+    # Editorial iterations
+    for iteration in range(max_iterations):
+        # Editor critique with full translator instructions
+        critique = editor.critique_translation(current_translation, source_text, memory_context_str, translator_prompt)
+        conversation_log.append(f"РЕДАКТОР (итерация {iteration + 1}): {critique}")
+        
+        # Enhanced translator response with full context awareness
+        revision_prompt = f"""ИТЕРАЦИЯ {iteration + 1} из {max_iterations}
+
+ПОЛНАЯ ИСТОРИЯ РАЗРАБОТКИ:
+{chr(10).join(conversation_log)}
+
+ИСХОДНЫЙ ТЕКСТ:
+{source_text}
+
+ТЕКУЩЕЕ СОСТОЯНИЕ:
+Твой текущий перевод: {current_translation}
+
+ПОСЛЕДНЯЯ КРИТИКА РЕДАКТОРА:
+{critique}
+
+ЗАДАЧА: 
+1. Проанализируй всю историю диалога - что ты пробовал, что сработало, что нет
+2. Пойми эволюцию своих переводов и логику критики редактора
+3. Учти все предыдущие замечания и создай улучшенную версию
+4. Покажи, что ты учишься на своих ошибках и развиваешь подход
+
+Создай следующую версию перевода, которая решает выявленные проблемы."""
+        
+        current_translation = call_claude(client, translator_prompt, revision_prompt)
+        conversation_log.append(f"ПЕРЕВОД v{iteration + 2}: {current_translation}")
+    
+    return current_translation, "\n\n".join(conversation_log)
+
 @retry(
     stop=stop_after_attempt(3), 
     wait=wait_exponential(multiplier=1, min=4, max=10),
@@ -210,71 +318,29 @@ def make_linking_prompt(mem):
 )
 async def translate_and_link(client, src_text, mem):
     """
-    Translate text and add semantic links in a single Claude call.
-    This is the unified approach that replaces separate translation and linking.
+    Translate text with editorial review system.
+    Uses LLMTranslator + LLMEditor for 3-iteration quality refinement.
     
-    CRITICAL FEATURE: Anti-repetition analysis - the LLM analyzes all past translations 
-    in memory to avoid repeating ANY phrases, jokes, or word combinations, ensuring 
-    each translation is completely original even at micro-level (2-3 words).
+    CRITICAL FEATURE: Agentic editorial system with conversation logging
     """
     try:
         start_time = time.time()
-        logger.info(f"Starting translation+linking for {len(src_text)} characters of text with {len(mem)} memory entries")
+        logger.info(f"Starting editorial translation for {len(src_text)} characters with {len(mem)} memory entries")
         
-        # Get the combined prompt with memory context
-        prompt = make_linking_prompt(mem)
-        logger.info(f"Prompt length: {len(prompt)} characters")
-        
-        # Truncate text if it's extremely long for logging
-        log_text = src_text[:100] + "..." if len(src_text) > 100 else src_text
-        logger.info(f"Text to translate+link (truncated): {log_text}")
-        
-        # Make the API call to Claude Sonnet 4 with extended thinking for maximum quality
-        logger.info(f"Sending request to Anthropic API using model: claude-sonnet-4-20250514 with extended thinking")
-        api_start = time.time()
-        resp = client.messages.create(
-            model="claude-sonnet-4-20250514",  # Using latest Claude Sonnet 4
-            max_tokens=16000,  # Must be greater than thinking budget_tokens (12000)
-            temperature=1.0,  # Must be 1.0 when thinking is enabled
-            thinking={
-                "type": "enabled",
-                "budget_tokens": 12000  # Substantial thinking budget for complex translation analysis
-            },
-            system=prompt,
-            messages=[
-                {"role": "user", "content": src_text}
-            ]
-        )
-        api_time = time.time() - api_start
-        logger.info(f"Anthropic API call with extended thinking completed in {api_time:.2f} seconds")
-        
-        # Extract and return the result (we only want the final text, not the thinking)
-        # With thinking mode, response contains both thinking blocks and text blocks
-        result = None
-        for content_block in resp.content:
-            if hasattr(content_block, 'text') and content_block.text:
-                result = content_block.text.strip()
-                break
-        
-        if not result:
-            logger.error("No text content found in API response")
-            raise ValueError("No text content found in API response")
+        # Run editorial process with memory list
+        logger.info("Starting editorial conversation between translator and editor")
+        final_translation, conversation_log = editorial_process(client, src_text, mem)
         
         total_time = time.time() - start_time
         
-        result_snippet = result[:100] + "..." if len(result) > 100 else result
-        logger.info(f"Translation+linking result (truncated): {result_snippet}")
-        logger.info(f"Translation+linking with extended thinking completed in {total_time:.2f} seconds")
+        result_snippet = final_translation[:100] + "..." if len(final_translation) > 100 else final_translation
+        logger.info(f"Editorial translation completed in {total_time:.2f} seconds: {result_snippet}")
         
-        # Validate result contains Russian characters
-        has_russian = any(ord('а') <= ord(c) <= ord('я') or ord('А') <= ord(c) <= ord('Я') for c in result)
-        if not has_russian:
-            logger.warning("Translation result doesn't contain Russian characters!")
+        # Return both translation and conversation log
+        return final_translation, conversation_log
         
-        return result
     except Exception as e:
-        logger.error(f"Anthropic API error: {str(e)}", exc_info=True)
-        logger.error(f"Failed to translate+link text of length {len(src_text)}")
+        logger.error(f"Editorial translation error: {str(e)}", exc_info=True)
         raise
 
  

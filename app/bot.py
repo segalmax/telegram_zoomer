@@ -199,9 +199,9 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
                 logger.info("Article extraction failed, using fallback link mention")
         
         # Always use modern Lurkmore style for Israeli Russian audience (only style supported)
-        logger.info("Translating in modern Lurkmore style for Israeli Russian audience with semantic linking...")
+        logger.info("Translating in modern Lurkmore style for Israeli Russian audience with editorial system...")
         translation_start = time.time()
-        linked_text = await translate_and_link(anthropic_client, translation_context, memory)
+        linked_text, conversation_log = await translate_and_link(anthropic_client, translation_context, memory)
         translation_time_ms = int((time.time() - translation_start) * 1000)
         
         # Track translation result (extract text without links for analytics)
@@ -242,6 +242,7 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
                 message_id=sent_message.id if sent_message else message_id,
                 channel_name=dst_channel_to_use.replace("@", ""),
                 message_url=destination_message_url,
+                conversation_log=conversation_log,
             )
             save_time = time.time() - save_start_time
             logger.info(f"✅ Translation pair saved successfully in {save_time:.3f}s: {pair_id}")
