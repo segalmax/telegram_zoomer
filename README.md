@@ -66,7 +66,7 @@ source .venv/bin/activate && python -m pytest tests/ -v && ./tests/test_polling_
 ./setup_heroku.sh && git push heroku main && heroku logs --tail --app <app>
 
 # Monitor performance
-python scripts/analytics_dashboard.py --detailed --export
+# Analytics system has been removed
 ```
 
 ---

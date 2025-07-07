@@ -3,7 +3,7 @@
 ## 🎯 Design Philosophy  
 Database-first → Zero local state → Heroku-safe
 
-## 🏗️ Core Tables (4 total)
+## 🏗️ Core Tables (2 total)
 
 ```mermaid
 erDiagram
@@ -22,25 +22,6 @@ erDiagram
         varchar message_url
         timestamp created_at
     }
-    
-    translation_sessions {
-        uuid id PK
-        varchar message_id
-        int total_processing_time_ms
-        int memories_found
-        float avg_memory_similarity
-        boolean success
-        timestamp session_start_time
-    }
-    
-    memory_usage_analytics {
-        uuid id PK
-        uuid session_id FK
-        uuid memory_pair_id FK
-        float similarity_score
-        float combined_score
-        int rank_position
-    }
 ```
 
 ## 📊 Table Functions
@@ -49,8 +30,6 @@ erDiagram
 |-------|---------|------------------|
 | `telegram_sessions` | Session persistence | Compressed storage |
 | `article_chunks` | Translation memory | pgvector embeddings |
-| `translation_sessions` | Performance analytics | Processing metrics |
-| `memory_usage_analytics` | Memory effectiveness | Similarity tracking |
 
 ## 🧠 Vector Memory System
 
@@ -109,24 +88,6 @@ stored = base64.b64encode(compressed).decode()
 - **production**: Live bot operations  
 - **test**: Automated testing
 
-## 📈 Analytics Architecture
-
-### Key Metrics Tracked
-```python
-{
-    'total_processing_time_ms': 15000,
-    'memory_query_time_ms': 200,
-    'memories_found': 8,
-    'avg_memory_similarity': 0.75,
-    'success': True
-}
-```
-
-### Memory Effectiveness
-- **Similarity scores**: Track semantic relevance
-- **Rank positions**: Understand usage patterns
-- **Combined scores**: Similarity + recency weighting
-
 ## ⚙️ Configuration
 ```bash
 # Supabase
@@ -148,4 +109,4 @@ TM_RECENCY_WEIGHT=0.3
 ### Database Indexes
 - **Vector index** → HNSW for fast similarity search
 - **Environment index** → efficient state queries
-- **Timestamp index** → analytics performance 
+- **Timestamp index** → query performance 

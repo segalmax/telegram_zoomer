@@ -24,7 +24,7 @@ import argparse
 
 from .vector_store import recall as recall_tm, save_pair as store_tm
 from .article_extractor import extract_article
-from .analytics import analytics
+
 # Using translate_and_link for unified semantic linking
 
 # Load environment variables explicitly from project root.
@@ -109,9 +109,7 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
         start_time = time.time()
         logger.info(f"Starting translation and posting for message ID: {message_id}")
         
-        # Start analytics session
-        article_url = message_entity_urls[0] if message_entity_urls else None
-        session_id = analytics.start_session(str(message_id) if message_id else None, txt, article_url)
+
         
         dst_channel_to_use = destination_channel or DST_CHANNEL
         logger.info(f"Using destination channel: {dst_channel_to_use}")
@@ -170,9 +168,7 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
                 
                 logger.info(f"📊 Memory stats: avg_sim={avg_similarity:.3f}, max_sim={max_similarity:.3f}, min_sim={min_similarity:.3f}")
                 
-                # Track memory metrics in analytics
-                analytics.set_memory_metrics(memory, int(memory_query_time * 1000))
-                analytics.track_memory_usage(session_id, memory)
+
                 
                 # Don't add full memory dump to user context - Claude gets compact summaries in system prompt
                 # This prevents context overload that can cause poor linking decisions
@@ -181,7 +177,6 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
                 logger.info(f"🔄 Translation context: {len(translation_context)} chars (memory provided separately via system prompt)")
             else:
                 logger.warning(f"❌ No memories found for message {message_id} in {memory_query_time:.3f}s")
-                analytics.set_memory_metrics([], int(memory_query_time * 1000))
                 
         except Exception as e:
             memory_query_time = time.time() - memory_start_time
@@ -193,7 +188,6 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
             if article_text:
                 translation_context += f"\n\nArticle content from {message_entity_urls[0]}:\n{article_text}"
                 logger.info(f"Added article content ({len(article_text)} chars) to translation context")
-                analytics.set_article_content(article_text)
             else:
                 translation_context += f"\n\nNote: This message contains a link: {message_entity_urls[0]}"
                 logger.info("Article extraction failed, using fallback link mention")
@@ -204,8 +198,7 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
         linked_text, conversation_log = await translate_and_link(anthropic_client, translation_context, memory)
         translation_time_ms = int((time.time() - translation_start) * 1000)
         
-        # Track translation result (extract text without links for analytics)
-        analytics.set_translation_result(linked_text, translation_time_ms)
+
 
         logger.info("Safety check disabled - posting Lurkmore-style translation with navigation links")
         
@@ -247,26 +240,21 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
             save_time = time.time() - save_start_time
             logger.info(f"✅ Translation pair saved successfully in {save_time:.3f}s: {pair_id}")
             
-            # Track save time in analytics
-            analytics.set_memory_save_time(int(save_time * 1000))
+
             
         except Exception as e:
             save_time = time.time() - save_start_time
             logger.error(f"💥 TM save failed for {pair_id} after {save_time:.3f}s: {e}", exc_info=True)
-            analytics.set_error(f"Memory save failed: {e}")
         
         logger.info(f"Total processing time for message: {time.time() - start_time:.2f} seconds")
         
-        # End analytics session
-        analytics.end_session()
+
         
         return sent_message
     except Exception as e:
         logger.error(f"Error processing message: {str(e)}", exc_info=True)
         
-        # Mark session as failed and end it
-        analytics.set_error(str(e))
-        analytics.end_session()
+
         
         return False
 
