@@ -20,11 +20,11 @@ def call_claude(client, system_prompt, user_message):
     """Unified Claude API call with consistent parameters"""
     response = client.messages.create(
         model="claude-sonnet-4-20250514",  # Using latest Claude Sonnet 4
-        max_tokens=30000,  # Must be greater than thinking budget_tokens (12000)
+        max_tokens=16000,  # Sufficient for output needs
         temperature=1.0,  # Must be 1.0 when thinking is enabled
         thinking={
             "type": "enabled",
-            "budget_tokens": 20000  # Substantial thinking budget for complex translation analysis
+            "budget_tokens": 10000  # Optimal balance: thorough analysis without timeouts
         },
         system=system_prompt,
         messages=[

@@ -1,0 +1,9 @@
+---
+alwaysApply: false
+---
+deploying process:
+1. commit the changes 
+2. push to github
+3. push to heroku
+4. view the logs on heroku: there should be a successful build and passed tests
+5. fix the issues and repeat the process
