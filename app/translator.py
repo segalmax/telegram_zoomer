@@ -226,30 +226,117 @@ def make_linking_prompt(mem):
 Верни ТОЛЬКО готовый пост. Никаких пояснений или мета-комментариев.
 </output_format>"""
 
+class LLMEditor:
+    """Minimal LLM Editor for critiquing translations"""
+    
+    def __init__(self, client):
+        self.client = client
+        
+    def critique_translation(self, translation_text, source_text, memory_context, translator_prompt):
+        """Critique a translation for repetitions and quality against the exact translator instructions"""
+        
+        prompt = f"""Ты опытный редактор канала Lurkmore в стиле современного "Лурка" для израильской русскоязычной аудитории.
+
+КРИТИЧЕСКИ ВАЖНО: Ты должен критиковать перевод на основе ТОЧНО ТЕХ ЖЕ ИНСТРУКЦИЙ, которые получил переводчик.
+
+ИНСТРУКЦИИ ПЕРЕВОДЧИКА (которые ты должен проверить):
+{translator_prompt}
+
+ИСХОДНЫЙ ТЕКСТ: {source_text}
+
+ПЕРЕВОД ДЛЯ ПРОВЕРКИ: {translation_text}
+
+КОНТЕКСТ ПАМЯТИ: {memory_context}
+
+ТВОЯ ЗАДАЧА КАК РЕДАКТОРА:
+1. Проверь соблюдение ВСЕХ инструкций переводчика (длина, стиль, анти-повторы, ссылки)
+2. Найди нарушения конкретных правил из системного промпта
+3. Проверь качество выполнения 12-шагового мыслительного процесса
+4. Оцени соблюдение анти-повтор правил и linking rules
+5. Проверь фактическую точность и стилистические требования
+
+НАПИШИ КОНКРЕТНУЮ КРИТИКУ с указанием:
+- Какие именно инструкции нарушены
+- Конкретные примеры проблем
+- Четкие указания для исправления
+"""
+        
+        response = call_claude_stream(self.client, "", prompt)
+        
+        return response
+
+def editorial_process(client, source_text, memory_list, max_iterations=1):
+    """Run editorial conversation between translator and editor - SINGLE ITERATION to avoid timeouts"""
+    
+    editor = LLMEditor(client)
+    conversation_log = []
+    
+    # Initial translation
+    translator_prompt = make_linking_prompt(memory_list)
+    memory_context_str = memory_block(memory_list) if memory_list else "Нет предыдущих постов."
+    
+    current_translation = call_claude_stream(client, translator_prompt, source_text)
+    conversation_log.append(f"ПЕРЕВОД v1: {current_translation}")
+    
+    # Single editorial iteration to avoid token explosion
+    for iteration in range(max_iterations):
+        # Editor critique with full translator instructions
+        critique = editor.critique_translation(current_translation, source_text, memory_context_str, translator_prompt)
+        conversation_log.append(f"РЕДАКТОР (итерация {iteration + 1}): {critique}")
+        
+        # Enhanced translator response with full context awareness
+        revision_prompt = f"""ИТЕРАЦИЯ {iteration + 1} из {max_iterations}
+
+ПОЛНАЯ ИСТОРИЯ РАЗРАБОТКИ:
+{chr(10).join(conversation_log)}
+
+ИСХОДНЫЙ ТЕКСТ:
+{source_text}
+
+ТЕКУЩЕЕ СОСТОЯНИЕ:
+Твой текущий перевод: {current_translation}
+
+ПОСЛЕДНЯЯ КРИТИКА РЕДАКТОРА:
+{critique}
+
+ЗАДАЧА: 
+1. Проанализируй всю историю диалога - что ты пробовал, что сработало, что нет
+2. Пойми эволюцию своих переводов и логику критики редактора
+3. Учти все предыдущие замечания и создай улучшенную версию
+4. Покажи, что ты учишься на своих ошибках и развиваешь подход
+
+Создай следующую версию перевода, которая решает выявленные проблемы."""
+        
+        current_translation = call_claude_stream(client, translator_prompt, revision_prompt)
+        conversation_log.append(f"ПЕРЕВОД v{iteration + 2}: {current_translation}")
+    
+    return current_translation, "\n\n".join(conversation_log)
+
 async def translate_and_link(client, src_text, mem):
     """
-    Translate text with streaming to avoid Claude 4 timeouts.
-    REMOVED: Editorial system and retries - fail fast strategy.
+    Translate text with editorial review system.
+    Uses LLMTranslator + LLMEditor for SINGLE iteration quality refinement.
+    
+    CRITICAL FEATURE: Agentic editorial system with conversation logging (1 iteration to avoid timeouts)
     """
     try:
         start_time = time.time()
-        logger.info(f"Starting streamlined translation for {len(src_text)} characters with {len(mem)} memory entries")
+        logger.info(f"Starting editorial translation for {len(src_text)} characters with {len(mem)} memory entries")
         
-        # Simple translation with memory - no editorial complexity
-        linking_prompt = make_linking_prompt(mem)
-        logger.info("Calling Claude with streaming to avoid timeout")
-        
-        translation = call_claude_stream(client, linking_prompt, src_text)
+        # Run editorial process with memory list - SINGLE ITERATION
+        logger.info("Starting editorial conversation between translator and editor (1 iteration)")
+        final_translation, conversation_log = editorial_process(client, src_text, mem, max_iterations=1)
         
         total_time = time.time() - start_time
-        result_snippet = translation[:100] + "..." if len(translation) > 100 else translation
-        logger.info(f"Streamlined translation completed in {total_time:.2f} seconds: {result_snippet}")
         
-        # Return translation and empty conversation log (editorial system removed)
-        return translation, f"SINGLE PASS TRANSLATION (no editorial iterations to avoid timeouts): {translation}"
+        result_snippet = final_translation[:100] + "..." if len(final_translation) > 100 else final_translation
+        logger.info(f"Editorial translation completed in {total_time:.2f} seconds: {result_snippet}")
+        
+        # Return both translation and conversation log
+        return final_translation, conversation_log
         
     except Exception as e:
-        logger.error(f"Translation error: {str(e)}", exc_info=True)
+        logger.error(f"Editorial translation error: {str(e)}", exc_info=True)
         raise
 
  
