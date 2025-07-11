@@ -62,3 +62,8 @@ tasks.json
 tasks/ 
 # MCP configuration with API keys (use mcp.json.example as template)
 .cursor/mcp.json
+.cursor/rules/cursor_rules.mdc
+.cursor/rules/dev_workflow.mdc
+.cursor/rules/self_improve.mdc
+.cursor/rules/taskmaster.mdc
+scripts/example_prd.txt
