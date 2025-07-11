@@ -16,6 +16,7 @@ from telethon.sessions import StringSession
 import anthropic
 from dotenv import load_dotenv
 from .translator import get_anthropic_client, translate_and_link
+from .config_loader import get_config_loader
 
 from .session_manager import setup_session, save_session_after_auth
 from telethon.errors import SessionPasswordNeededError
@@ -26,6 +27,9 @@ from .vector_store import recall as recall_tm, save_pair as store_tm
 from .article_extractor import extract_article
 
 # Using translate_and_link for unified semantic linking
+
+# Initialize configuration loader
+config = get_config_loader()
 
 # Load environment variables explicitly from project root.
 # Order of loading determines precedence for non-secret variables if keys overlap.
@@ -298,12 +302,19 @@ async def setup_event_handlers(client_instance):
         except Exception as e:
             logger.error(f"Error in handle_new_message: {str(e)}", exc_info=True)
 
-async def process_recent_posts(client_instance, limit=10, timeout=300):
+async def process_recent_posts(client_instance, limit=None, timeout=None):
     # Renamed client to client_instance
+    # Get processing limits from database
+    processing_limits = config.get_processing_limits()
+    if limit is None:
+        limit = processing_limits['batch_message_limit']
+    if timeout is None:
+        timeout = processing_limits['batch_timeout_seconds']
+    
     try:
         logger.info(f"Begin processing {limit} most recent posts from channel '{SRC_CHANNEL}'")
         start_time = time.time()
-        fetch_timeout = min(60, timeout / 2)
+        fetch_timeout = min(processing_limits['fetch_timeout_seconds'], timeout / 2)
         try:
             messages = await asyncio.wait_for(
                 client_instance.get_messages(SRC_CHANNEL, limit=limit), 
@@ -318,7 +329,7 @@ async def process_recent_posts(client_instance, limit=10, timeout=300):
         processed_count = 0
         for msg in reversed(messages):
             if not msg.text: continue
-            if time.time() - start_time > timeout - 30: # Reserve 30s
+            if time.time() - start_time > timeout - processing_limits['timeout_buffer_seconds']: # Reserve time buffer
                 logger.warning("Approaching timeout, stopping batch processing.")
                 break
             logger.info(f"Processing message {msg.id}: {msg.text[:50]}...")
@@ -347,7 +358,7 @@ async def process_recent_posts(client_instance, limit=10, timeout=300):
             
             logger.info(f"Extracted URLs from message: {message_entity_urls}")
             
-            processing_msg_timeout = min(180, (timeout - (time.time() - start_time)) / (len(messages) - processed_count + 1))
+            processing_msg_timeout = min(processing_limits['processing_timeout_seconds'], (timeout - (time.time() - start_time)) / (len(messages) - processed_count + 1))
             try:
                 sent_message = await asyncio.wait_for(
                     translate_and_post(client_instance, msg.text, msg.id, message_entity_urls=message_entity_urls),
@@ -358,7 +369,7 @@ async def process_recent_posts(client_instance, limit=10, timeout=300):
                 logger.error(f"Timed out processing message {msg.id}")
             except Exception as e:
                 logger.error(f"Error processing message {msg.id}: {str(e)}", exc_info=True)
-            await asyncio.sleep(1) # Rate limit
+            await asyncio.sleep(processing_limits['rate_limit_sleep_seconds']) # Rate limit
         logger.info(f"Batch processing completed. Processed {processed_count}/{len(messages)} messages")
         return processed_count
     except Exception as e:
@@ -396,7 +407,8 @@ async def process_recent_messages(client, count):
             sent_message = await translate_and_post(client, msg.text, msg.id, message_entity_urls=message_entity_urls)
             
             # Add a short delay between processing messages
-            await asyncio.sleep(1)
+            processing_limits = config.get_processing_limits()
+            await asyncio.sleep(processing_limits['rate_limit_sleep_seconds'])
             
         logger.info(f"Completed processing {count} recent messages")
         return True
@@ -441,7 +453,10 @@ async def main():
         # message *before* the bot starts can still be picked up.
         if TEST_MODE and os.getenv("TEST_RUN_MESSAGE_PREFIX"):
             try:
-                await process_recent_posts(client, limit=20, timeout=120)
+                # Get test mode limits from database
+                test_batch_limit = int(config.get_setting('TEST_MODE_BATCH_LIMIT'))
+                test_timeout = int(config.get_setting('TEST_MODE_TIMEOUT'))
+                await process_recent_posts(client, limit=test_batch_limit, timeout=test_timeout)
             except Exception as e:
                 logger.warning(f"TEST_MODE pre-processing recent posts failed: {e}")
         
@@ -468,7 +483,9 @@ async def main():
                                     message_entity_urls.append(url_text)
                 
                 sent_message = await translate_and_post(client, msg.text, msg.id, message_entity_urls=message_entity_urls)
-                await asyncio.sleep(2)  # Add delay between processing
+                # Add delay between processing
+                processing_limits = config.get_processing_limits()
+                await asyncio.sleep(processing_limits['rate_limit_sleep_seconds'])
             
             logger.info("Finished processing recent messages")
             logger.info("🏁 Exiting after processing recent messages (not starting polling mode)")
