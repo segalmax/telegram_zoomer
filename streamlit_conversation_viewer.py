@@ -6,6 +6,7 @@ from datetime import datetime
 import json
 from app.translator import get_anthropic_client
 from app.config_loader import get_config_loader
+from app.vector_store import recall  # Import for real memory data
 
 # Page config
 st.set_page_config(
@@ -34,481 +35,393 @@ st.markdown("""
 }
 
 .thinking-box {
-    background: #f8f9fa;
+    background: #f0f2f6;
+    border-left: 4px solid #4CAF50;
     padding: 1rem;
-    border-left: 4px solid #FF6B35;
-    border-radius: 8px;
+    margin: 0.5rem 0;
+    border-radius: 5px;
     font-family: 'Courier New', monospace;
-    font-size: 14px;
-    margin: 1rem 0;
     white-space: pre-wrap;
-    line-height: 1.4;
 }
 
 .response-box {
     background: #e8f4fd;
+    border-left: 4px solid #2196F3;
     padding: 1rem;
-    border-left: 4px solid #1f77b4;
-    border-radius: 8px;
-    margin: 1rem 0;
-    line-height: 1.6;
+    margin: 0.5rem 0;
+    border-radius: 5px;
 }
 
-.conversation-step {
-    border: 1px solid #ddd;
-    border-radius: 10px;
+.memory-box {
+    background: #fff3cd;
+    border: 1px solid #ffeaa7;
+    border-radius: 8px;
     padding: 1rem;
-    margin: 1rem 0;
-    background: white;
+    margin: 0.5rem 0;
 }
 
 .step-header {
+    font-size: 1.2rem;
     font-weight: bold;
-    color: #333;
-    margin-bottom: 0.5rem;
+    color: #2c3e50;
+    margin: 1rem 0 0.5rem 0;
 }
 
-.thinking-header {
-    color: #FF6B35;
-    font-weight: bold;
-    font-size: 16px;
-    margin-bottom: 0.5rem;
-    display: flex;
-    align-items: center;
+.translator-step {
+    color: #27ae60;
 }
 
-.response-header {
-    color: #1f77b4;
-    font-weight: bold;
-    font-size: 16px;
-    margin-bottom: 0.5rem;
-    display: flex;
-    align-items: center;
-}
-
-.streaming-container {
-    border: 1px solid #e0e0e0;
-    border-radius: 10px;
-    margin: 1rem 0;
-    overflow: hidden;
-}
-
-.streaming-header {
-    background: #f5f5f5;
-    padding: 0.8rem;
-    border-bottom: 1px solid #e0e0e0;
-    font-weight: bold;
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-}
-
-.streaming-content {
-    padding: 1rem;
-    max-height: 400px;
-    overflow-y: auto;
-    font-family: 'Courier New', monospace;
-    font-size: 14px;
-    line-height: 1.4;
-    background: white;
+.editor-step {
+    color: #e74c3c;
 }
 </style>
 """, unsafe_allow_html=True)
 
-def main():
-    st.markdown('<h1 class="main-header">🤖 Claude Translation Studio</h1>', unsafe_allow_html=True)
-    st.markdown("**Real-time AI conversation viewer with Claude's thinking process**")
-    
-    # Sidebar for settings
-    with st.sidebar:
-        st.header("⚙️ Settings")
+def show_memory_entries(memory):
+    """Display translation memory entries in a nice format"""
+    if not memory:
+        st.info("💭 No relevant translation memory found")
+        return
         
-        # API Key check
-        api_key = os.getenv('ANTHROPIC_API_KEY')
-        if api_key:
-            st.success("✅ Claude API Key loaded")
-        else:
-            st.error("❌ No Claude API Key found")
-            st.stop()
-            
-        # Model info
-        try:
-            config = get_config_loader()
-            ai_config = config.get_ai_model_config()
-            st.info(f"📋 Model: {ai_config['model_id']}")
-            st.info(f"🎯 Max Tokens: {ai_config['max_tokens']:,}")
-            st.info(f"🌡️ Temperature: {ai_config['temperature']}")
-        except Exception as e:
-            st.error(f"Config error: {e}")
+    st.markdown("### 📚 Translation Memory Context")
+    st.markdown(f"Found **{len(memory)}** similar past translations:")
     
-    # Main content tabs
-    tab1, tab2, tab3 = st.tabs(["🚀 Live Translation", "📊 Conversation History", "💰 Cost Analytics"])
-    
-    with tab1:
-        st.header("🚀 Live Translation with Claude's Thinking Process")
-        
-        # Input form
-        with st.form("translation_form"):
-            source_text = st.text_area(
-                "Enter text to translate:",
-                placeholder="Breaking news: Tech billionaire announces major acquisition...",
-                height=150
-            )
-            
-            # Memory simulation
-            use_memory = st.checkbox("Simulate previous translations (for context)")
-            
-            submitted = st.form_submit_button("🔥 Start Translation", type="primary")
-        
-        if submitted and source_text.strip():
-            run_live_translation_with_streaming(source_text, use_memory)
-    
-    with tab2:
-        st.header("📊 Conversation History")
-        show_conversation_history()
-    
-    with tab3:
-        st.header("💰 Cost Analytics")
-        show_cost_analytics()
+    for i, entry in enumerate(memory, 1):
+        with st.expander(f"Memory #{i}: {entry['translation_text'][:60]}..."):
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.markdown("**Translation:**")
+                st.text(entry['translation_text'])
+            with col2:
+                if 'message_url' in entry:
+                    st.markdown("**Source:**")
+                    st.markdown(f"[View Message]({entry['message_url']})")
 
 def run_live_translation_with_streaming(source_text, use_memory):
-    """Run live translation with real-time thinking and response streaming"""
+    """Run live translation with real-time Claude thinking and response streaming"""
     
     # Initialize session state for tracking
     if 'conversation_history' not in st.session_state:
         st.session_state.conversation_history = []
     
-    # Prepare memory
+    # Prepare memory from real database
     memory = []
     if use_memory:
-        memory = [
-            {
-                'translation_text': '🇺🇸 Трамп выиграл выборы. Либералы в шоке',
-                'message_url': 'https://t.me/test/123'
-            },
-            {
-                'translation_text': '🇮🇱 Нетаньяху встретился с Байденом',
-                'message_url': 'https://t.me/test/124'
-            }
-        ]
+        try:
+            # Get real translation memory from database using vector similarity
+            config = get_config_loader()
+            k = int(config.get_setting('DEFAULT_RECALL_K'))
+            memory = recall(source_text, k=k)
+            
+            # Display memory entries
+            show_memory_entries(memory)
+            
+        except Exception as e:
+            st.error(f"❌ Error loading memory: {str(e)}")
     
-    # Create containers for streaming
+    # Create containers for live streaming
     status_container = st.empty()
+    thinking_container = st.empty()
+    response_container = st.empty()
+    stats_container = st.empty()
     
-    # Main streaming area
-    st.markdown("### 🔄 Claude's Editorial Process")
-    
-    # Start translation
-    start_time = time.time()
-    conversation_log = ""
-    final_translation = ""
-    
+    # Initialize client
     try:
         client = get_anthropic_client(os.getenv('ANTHROPIC_API_KEY'))
-        
-        # Run streaming translation
-        for step in stream_translation_process(client, source_text, memory):
-            if step['type'] == 'thinking':
-                display_thinking_stream(step['content'], step['step_name'])
-            elif step['type'] == 'response':
-                final_translation = display_response_stream(step['content'], step['step_name'])
-            elif step['type'] == 'status':
-                with status_container:
-                    st.info(f"🔄 {step['content']}")
-            elif step['type'] == 'complete':
-                conversation_log = step['conversation_log']
-                final_translation = step['final_translation']
-        
-        end_time = time.time()
-        duration = end_time - start_time
-        
-        # Final status
-        with status_container:
-            st.success(f"✅ Translation completed in {duration:.1f}s")
-        
-        # Display final stats
-        display_translation_stats(source_text, final_translation, duration, memory)
-        
-        # Save to history
-        save_to_history(source_text, final_translation, conversation_log, duration)
-        
     except Exception as e:
-        with status_container:
-            st.error(f"❌ Translation failed: {str(e)}")
+        st.error(f"❌ Failed to initialize Claude client: {str(e)}")
+        return
 
-def stream_translation_process(client, source_text, memory):
-    """Generator that yields streaming updates from the translation process"""
-    
-    # Simulate the editorial process with real API calls
-    import asyncio
+    # Import the streaming function
     from app.translator import translate_and_link_streaming
     
-    # Create event loop
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    
     try:
-        # Run the streaming translation
-        async_gen = translate_and_link_streaming(client, source_text, memory)
-        
-        conversation_log = ""
+        # Run the streaming translation - NOTE: removed ai_config parameter
+        start_time = time.time()
+        current_step = ""
+        thinking_text = ""
+        response_text = ""
         final_translation = ""
+        conversation_log = ""
         
-        # Convert async generator to sync
-        while True:
-            try:
-                step = loop.run_until_complete(async_gen.__anext__())
+        # Create async generator - translate_and_link_streaming no longer takes ai_config
+        async def run_streaming():
+            async for update in translate_and_link_streaming(client, source_text, memory):
+                yield update
                 
-                if step['type'] == 'complete':
-                    conversation_log = step['conversation_log']
-                    final_translation = step['final_translation']
+        # Run async generator in sync context
+        import asyncio
+        
+        async def process_stream():
+            nonlocal current_step, thinking_text, response_text, final_translation, conversation_log
+            
+            async for update in run_streaming():
+                update_type = update.get('type', '')
                 
-                yield step
-                
-                if step['type'] == 'complete':
+                if update_type == 'status':
+                    # Update current step with role identification
+                    step_name = update.get('step_name', 'Processing')
+                    current_step = step_name
+                    
+                    # Apply role-specific styling
+                    if 'translator' in step_name.lower() or 'translation' in step_name.lower():
+                        step_class = "translator-step"
+                        role_icon = "🔄"
+                    elif 'editor' in step_name.lower() or 'critique' in step_name.lower():
+                        step_class = "editor-step" 
+                        role_icon = "🧐"
+                    else:
+                        step_class = ""
+                        role_icon = "⚙️"
+                    
+                    status_html = f'<div class="step-header {step_class}">{role_icon} {step_name}</div>'
+                    status_container.markdown(status_html, unsafe_allow_html=True)
+                    
+                elif update_type == 'thinking':
+                    # Handle thinking content - the reverted code returns lists
+                    content = update.get('content', '')
+                    if isinstance(content, list):
+                        content = ''.join(str(item) for item in content)
+                    thinking_text += str(content)
+                    thinking_html = f'<div class="thinking-box"><strong>💭 Thinking:</strong><br>{thinking_text}</div>'
+                    thinking_container.markdown(thinking_html, unsafe_allow_html=True)
+                    
+                elif update_type == 'response':
+                    # Handle response content - the reverted code returns lists
+                    content = update.get('content', '')
+                    if isinstance(content, list):
+                        content = ''.join(str(item) for item in content)
+                    response_text += str(content)
+                    response_html = f'<div class="response-box"><strong>💬 Response:</strong><br>{response_text}</div>'
+                    response_container.markdown(response_html, unsafe_allow_html=True)
+                    
+                elif update_type == 'stats':
+                    # Show stats from the reverted translator
+                    stats_content = update.get('content', {})
+                    if stats_content:
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("⏱️ Duration", f"{stats_content.get('duration', 0):.1f}s")
+                        with col2:
+                            st.metric("🔤 Input Tokens", f"{stats_content.get('input_tokens', 0):,}")
+                        with col3:
+                            st.metric("💰 Cost", f"${stats_content.get('total_cost', 0):.4f}")
+                    
+                elif update_type == 'complete':
+                    # Handle completion from the reverted translator
+                    final_translation = update.get('final_translation', '')
+                    conversation_log = update.get('conversation_log', '')
+                    duration = update.get('duration', 0)
+                    
+                    # Clear streaming containers
+                    thinking_container.empty()
+                    response_container.empty()
+                    status_container.empty()
+                    
+                    # Show final result
+                    st.success("✅ Translation Complete!")
+                    st.markdown("### 🎯 Final Translation:")
+                    st.text_area("Final Translation", final_translation, height=150, disabled=True, label_visibility="collapsed")
+                    
+                    # Show conversation log
+                    if conversation_log:
+                        with st.expander("📋 Translation Process Log"):
+                            st.text_area("Conversation Log", conversation_log, height=200, disabled=True, label_visibility="collapsed")
+                    
+                    # Add to conversation history
+                    conversation_entry = {
+                        'timestamp': datetime.now(),
+                        'source_text': source_text,
+                        'final_translation': final_translation,
+                        'memory_used': len(memory),
+                        'duration': duration
+                    }
+                    st.session_state.conversation_history.append(conversation_entry)
                     break
                     
-            except StopAsyncIteration:
-                break
+                elif update_type == 'error':
+                    # Show comprehensive error details
+                    error_message = update.get('content', 'Unknown error')
+                    
+                    # Clear streaming containers
+                    thinking_container.empty()
+                    response_container.empty()
+                    status_container.empty()
+                    
+                    # Show main error
+                    st.error(f"❌ Translation Error: {error_message}")
+                    
+                    # Show troubleshooting tips
+                    st.info("💡 **Troubleshooting Tips:**\n"
+                           "- Check if Claude API is overloaded (try again in a few minutes)\n"
+                           "- Verify API key is correctly set in environment\n"
+                           "- Ensure database connection is working\n"
+                           "- Try with shorter text to test basic functionality")
+                    break
+        
+        # Run the async processing
+        try:
+            asyncio.run(process_stream())
+        except Exception as e:
+            # Comprehensive error handling
+            import traceback
+            
+            # Clear any remaining streaming containers
+            thinking_container.empty()
+            response_container.empty()
+            status_container.empty()
+            
+            # Show main error
+            st.error(f"❌ Translation failed: {str(e)}")
+            
+            # Show detailed error information
+            with st.expander("🔍 Detailed Error Information (Click to expand)", expanded=True):
+                col1, col2 = st.columns(2)
                 
-    finally:
-        loop.close()
-
-def display_thinking_stream(content_generator, step_name):
-    """Display thinking process with streaming effect"""
-    
-    # Create container for this thinking step
-    with st.container():
-        st.markdown(f"""
-        <div class="streaming-container">
-            <div class="streaming-header">
-                🧠 Claude is thinking: {step_name}
-            </div>
-            <div class="streaming-content" id="thinking-content">
-        """, unsafe_allow_html=True)
-        
-        # Stream the thinking content
-        thinking_placeholder = st.empty()
-        accumulated_thinking = ""
-        
-        if hasattr(content_generator, '__iter__'):
-            # If it's an iterable of chunks
-            for chunk in content_generator:
-                accumulated_thinking += chunk
-                with thinking_placeholder:
-                    st.markdown(f'<div class="thinking-box">{accumulated_thinking}</div>', 
-                              unsafe_allow_html=True)
-                time.sleep(0.02)  # Small delay for visual effect
-        else:
-            # If it's a single string, simulate streaming
-            for char in content_generator:
-                accumulated_thinking += char
-                with thinking_placeholder:
-                    st.markdown(f'<div class="thinking-box">{accumulated_thinking}</div>', 
-                              unsafe_allow_html=True)
-                time.sleep(0.01)
-        
-        st.markdown("</div></div>", unsafe_allow_html=True)
-
-def display_response_stream(content_generator, step_name):
-    """Display response with streaming effect"""
-    
-    # Create container for this response step
-    with st.container():
-        st.markdown(f"""
-        <div class="streaming-container">
-            <div class="streaming-header">
-                💬 Claude's response: {step_name}
-            </div>
-            <div class="streaming-content">
-        """, unsafe_allow_html=True)
-        
-        # Use st.write_stream for natural streaming
-        if hasattr(content_generator, '__iter__'):
-            response = st.write_stream(content_generator)
-        else:
-            # Fallback for single strings
-            response = st.write_stream(char for char in content_generator)
-        
-        st.markdown("</div></div>", unsafe_allow_html=True)
-        
-        return response
-
-def parse_conversation_log(conversation_log):
-    """Parse conversation log into structured steps"""
-    steps = []
-    if not conversation_log:
-        return steps
-    
-    lines = conversation_log.split('\n\n')
-    
-    for line in lines:
-        if line.strip():
-            if line.startswith('ПЕРЕВОД v1:'):
-                steps.append({
-                    'type': 'translation',
-                    'version': 1,
-                    'content': line.replace('ПЕРЕВОД v1: ', '').strip()
-                })
-            elif line.startswith('РЕДАКТОР'):
-                steps.append({
-                    'type': 'critique',
-                    'content': line.split('): ', 1)[1].strip() if '): ' in line else line.strip()
-                })
-            elif line.startswith('ПЕРЕВОД v'):
-                version = line.split('v')[1].split(':')[0]
-                steps.append({
-                    'type': 'revision',
-                    'version': int(version),
-                    'content': line.split(': ', 1)[1].strip() if ': ' in line else line.strip()
-                })
-    
-    return steps
-
-def display_conversation_flow(steps, final_translation):
-    """Display the conversation flow in a beautiful format"""
-    st.markdown("### 🔄 Editorial Conversation Flow")
-    
-    for i, step in enumerate(steps):
-        if step['type'] == 'translation':
-            st.markdown(f"""
-            <div class="conversation-step">
-                <div class="step-header">📝 Initial Translation (v{step['version']})</div>
-                <div class="response-box">{step['content']}</div>
-            </div>
-            """, unsafe_allow_html=True)
+                with col1:
+                    st.markdown("**Error Details:**")
+                    st.json({
+                        'error_type': type(e).__name__,
+                        'error_message': str(e),
+                        'source_text_length': len(source_text),
+                        'memory_items': len(memory)
+                    })
+                
+                with col2:
+                    st.markdown("**Full Python Traceback:**")
+                    st.code(traceback.format_exc(), language='python')
             
-        elif step['type'] == 'critique':
-            st.markdown(f"""
-            <div class="conversation-step">
-                <div class="step-header">🔍 Editor Critique</div>
-                <div class="thinking-box">{step['content']}</div>
-            </div>
-            """, unsafe_allow_html=True)
+            # Add debug information
+            with st.expander("🔧 Debug Information", expanded=False):
+                st.markdown("**Environment:**")
+                st.json({
+                    'anthropic_api_key_set': bool(os.getenv('ANTHROPIC_API_KEY')),
+                    'api_key_length': len(os.getenv('ANTHROPIC_API_KEY', '')) if os.getenv('ANTHROPIC_API_KEY') else 0,
+                    'source_text_preview': source_text[:100] + '...' if len(source_text) > 100 else source_text,
+                    'memory_preview': [m.get('translation_text', '')[:50] + '...' for m in memory[:3]] if memory else []
+                })
             
-        elif step['type'] == 'revision':
-            st.markdown(f"""
-            <div class="conversation-step">
-                <div class="step-header">✨ Revised Translation (v{step['version']})</div>
-                <div class="response-box">{step['content']}</div>
-            </div>
-            """, unsafe_allow_html=True)
-    
-    # Final result
-    st.markdown("### 🎯 Final Result")
-    st.success(f"**Final Translation:** {final_translation}")
+            # Troubleshooting guide
+            st.info("💡 **Troubleshooting Guide:**\n"
+                   "1. **API Issues**: Check if Claude API is overloaded (wait 5-10 minutes)\n"
+                   "2. **Authentication**: Verify ANTHROPIC_API_KEY is set correctly\n"
+                   "3. **Database**: Ensure Django database connection is working\n"
+                   "4. **Text Length**: Try with shorter text (under 1000 characters)\n"
+                   "5. **Memory**: Disable 'Use Translation Memory' to test basic functionality")
+        
+    except Exception as e:
+        # Catch-all for any other errors
+        import traceback
+        st.error(f"❌ Critical error during setup: {str(e)}")
+        with st.expander("🔍 Setup Error Details", expanded=True):
+            st.code(traceback.format_exc(), language='python')
 
-def display_translation_stats(source_text, final_translation, duration, memory):
-    """Display comprehensive translation statistics"""
+def show_live_translation():
+    """Main live translation interface"""
+    st.markdown('<h1 class="main-header">🔥 Live Translation Studio</h1>', unsafe_allow_html=True)
     
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2 = st.columns([3, 1])
     
     with col1:
-        st.metric("⏱️ Duration", f"{duration:.1f}s")
+        source_text = st.text_area(
+            "Enter text to translate:",
+            height=200,
+            placeholder="Enter Hebrew news text here..."
+        )
     
     with col2:
-        st.metric("📝 Source Length", f"{len(source_text)} chars")
+        st.markdown("### ⚙️ Settings")
+        use_memory = st.checkbox("Use Translation Memory", value=True)
+        
+        st.markdown("### 🎯 Quick Tests")
+        if st.button("Test: Simple Text"):
+            source_text = "שלום עולם"
+            st.rerun()
+        if st.button("Test: News Article"):
+            source_text = "ישראל חתמה על הסכם שלום עם מדינה ערבית נוספת"
+            st.rerun()
     
-    with col3:
-        st.metric("📤 Output Length", f"{len(final_translation)} chars")
-    
-    with col4:
-        st.metric("🧠 Memory Items", len(memory))
-    
-    # Cost estimation (simplified)
-    est_input_tokens = len(source_text) * 1.3  # Rough estimate
-    est_output_tokens = len(final_translation) * 1.3
-    est_cost = (est_input_tokens / 1_000_000 * 3.0) + (est_output_tokens / 1_000_000 * 15.0)
-    
-    st.markdown(f"""
-    <div class="cost-box">
-        <h4>💰 Estimated Cost Breakdown</h4>
-        <p>📥 Input: ~{est_input_tokens:.0f} tokens</p>
-        <p>📤 Output: ~{est_output_tokens:.0f} tokens</p>
-        <p>💵 Total Cost: ~${est_cost:.4f}</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-def save_to_history(source_text, final_translation, conversation_log, duration):
-    """Save translation to session history"""
-    if 'conversation_history' not in st.session_state:
-        st.session_state.conversation_history = []
-    
-    entry = {
-        'timestamp': datetime.now().isoformat(),
-        'source_text': source_text,
-        'final_translation': final_translation,
-        'conversation_log': conversation_log,
-        'duration': duration
-    }
-    
-    st.session_state.conversation_history.insert(0, entry)
-    
-    # Keep only last 10 entries
-    if len(st.session_state.conversation_history) > 10:
-        st.session_state.conversation_history = st.session_state.conversation_history[:10]
+    if st.button("🚀 Start Live Translation", type="primary", disabled=not source_text.strip()):
+        if source_text.strip():
+            run_live_translation_with_streaming(source_text.strip(), use_memory)
+        else:
+            st.warning("⚠️ Please enter some text to translate")
 
 def show_conversation_history():
     """Display conversation history"""
+    st.markdown('<h1 class="main-header">📚 Conversation History</h1>', unsafe_allow_html=True)
+    
     if 'conversation_history' not in st.session_state or not st.session_state.conversation_history:
-        st.info("📝 No conversation history yet. Run some translations to see them here!")
+        st.info("💭 No conversations yet. Go to Live Translation to start!")
         return
     
-    st.write(f"**Showing {len(st.session_state.conversation_history)} recent translations:**")
+    st.markdown(f"**Total Conversations:** {len(st.session_state.conversation_history)}")
     
-    for i, entry in enumerate(st.session_state.conversation_history):
-        with st.expander(f"🔍 Translation #{i+1} - {entry['timestamp'][:19]}"):
+    for i, entry in enumerate(reversed(st.session_state.conversation_history), 1):
+        with st.expander(f"Conversation #{len(st.session_state.conversation_history) - i + 1} - {entry['timestamp'].strftime('%Y-%m-%d %H:%M:%S')}"):
             col1, col2 = st.columns(2)
             
             with col1:
-                st.markdown("**📥 Source Text:**")
-                st.text_area("", entry['source_text'], disabled=True, key=f"source_{i}")
+                st.markdown("**Source Text:**")
+                st.text_area("Source Text", entry['source_text'], disabled=True, key=f"source_{i}", label_visibility="collapsed")
             
             with col2:
-                st.markdown("**📤 Final Translation:**")
-                st.text_area("", entry['final_translation'], disabled=True, key=f"translation_{i}")
+                st.markdown("**Translation:**")
+                st.text_area("Translation", entry['final_translation'], disabled=True, key=f"translation_{i}", label_visibility="collapsed")
             
-            st.markdown(f"**⏱️ Duration:** {entry['duration']:.1f}s")
-            
-            if st.button(f"Show Full Conversation", key=f"show_conv_{i}"):
-                st.text_area("Full Conversation Log:", entry['conversation_log'], height=300, disabled=True)
+            # Show stats if available
+            col3, col4 = st.columns(2)
+            with col3:
+                st.metric("Memory Used", entry.get('memory_used', 0))
+            with col4:
+                st.metric("Duration", f"{entry.get('duration', 0):.1f}s")
 
 def show_cost_analytics():
     """Display cost analytics"""
+    st.markdown('<h1 class="main-header">💰 Cost Analytics</h1>', unsafe_allow_html=True)
+    
     if 'conversation_history' not in st.session_state or not st.session_state.conversation_history:
-        st.info("💰 No cost data yet. Run some translations to see analytics!")
+        st.info("💭 No data yet. Complete some translations first!")
         return
     
-    # Calculate total stats
-    total_translations = len(st.session_state.conversation_history)
-    total_duration = sum(entry['duration'] for entry in st.session_state.conversation_history)
-    avg_duration = total_duration / total_translations
+    # Calculate totals
+    total_conversations = len(st.session_state.conversation_history)
+    total_duration = sum(entry.get('duration', 0) for entry in st.session_state.conversation_history)
+    avg_duration = total_duration / max(total_conversations, 1)
     
+    # Display summary metrics
     col1, col2, col3 = st.columns(3)
-    
     with col1:
-        st.metric("📊 Total Translations", total_translations)
-    
+        st.metric("💬 Conversations", total_conversations)
     with col2:
-        st.metric("⏱️ Total Time", f"{total_duration:.1f}s")
-    
+        st.metric("⏱️ Total Duration", f"{total_duration:.1f}s")
     with col3:
-        st.metric("📈 Avg Duration", f"{avg_duration:.1f}s")
+        st.metric("📊 Avg Duration", f"{avg_duration:.1f}s")
     
-    # Estimated costs
-    total_chars_in = sum(len(entry['source_text']) for entry in st.session_state.conversation_history)
-    total_chars_out = sum(len(entry['final_translation']) for entry in st.session_state.conversation_history)
+    # Show duration trend
+    if total_conversations > 1:
+        st.markdown("### 📈 Duration Trend")
+        durations = [entry.get('duration', 0) for entry in st.session_state.conversation_history]
+        st.line_chart(durations)
+
+def main():
+    """Main Streamlit application"""
+    # Sidebar navigation
+    with st.sidebar:
+        st.markdown("## 🤖 Claude Translation Studio")
+        page = st.radio("Navigate:", [
+            "🔥 Live Translation",
+            "📚 Conversation History", 
+            "💰 Cost Analytics"
+        ])
     
-    est_total_cost = (total_chars_in * 1.3 / 1_000_000 * 3.0) + (total_chars_out * 1.3 / 1_000_000 * 15.0)
-    
-    st.markdown(f"""
-    <div class="cost-box">
-        <h4>💰 Session Cost Summary</h4>
-        <p>📝 Characters Processed: {total_chars_in + total_chars_out:,}</p>
-        <p>💵 Estimated Total Cost: ${est_total_cost:.4f}</p>
-        <p>📊 Cost per Translation: ${est_total_cost/total_translations:.4f}</p>
-    </div>
-    """, unsafe_allow_html=True)
+    # Route to appropriate page
+    if page == "🔥 Live Translation":
+        show_live_translation()
+    elif page == "📚 Conversation History":
+        show_conversation_history()
+    elif page == "💰 Cost Analytics":
+        show_cost_analytics()
 
 if __name__ == "__main__":
     main() 
