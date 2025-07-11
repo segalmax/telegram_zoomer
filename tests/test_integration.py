@@ -7,11 +7,11 @@ import sys
 import os
 import asyncio
 
-# Add app directory to path (go up one level from tests/ to project root, then into app/)
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'app'))
+# Add project root directory to path so we can import the app package
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from article_extractor import extract_article
-from translator import get_anthropic_client, translate_and_link
+from app.article_extractor import extract_article
+from app.translator import get_anthropic_client, translate_and_link
 
 import pytest
 

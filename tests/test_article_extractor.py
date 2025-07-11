@@ -6,10 +6,10 @@ Quick test of the article extractor module
 import sys
 import os
 
-# Add app directory to path (go up one level from tests/ to project root, then into app/)
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'app'))
+# Add project root directory to path so we can import the app package
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from article_extractor import extract_article, extract_article_with_metadata
+from app.article_extractor import extract_article, extract_article_with_metadata
 
 def test_article_extraction():
     """Test article extraction functionality"""
