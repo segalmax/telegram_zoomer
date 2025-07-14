@@ -67,3 +67,6 @@ tasks/
 .cursor/rules/self_improve.mdc
 .cursor/rules/taskmaster.mdc
 scripts/example_prd.txt
+.cache/41/cache.db
+.cache/41/cache.db-shm
+.cache/41/cache.db-wal
