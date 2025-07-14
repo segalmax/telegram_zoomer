@@ -1,0 +1,145 @@
+"""AutoGen-based Translator and Editor pipeline for production.
+Fail-fast, no fallbacks, uses Supabase-driven config, keeps translation-memory context.
+"""
+
+from __future__ import annotations
+
+import os
+import asyncio
+from typing import Any, Dict, List, Tuple
+
+from autogen_agentchat.agents import AssistantAgent
+from autogen_agentchat.teams import RoundRobinGroupChat
+from autogen_agentchat.conditions import MaxMessageTermination
+from autogen_agentchat.ui import Console
+from autogen_ext.models.openai import OpenAIChatCompletionClient
+from autogen_ext.models.anthropic import AnthropicChatCompletionClient
+
+from app.config_loader import get_config_loader
+from app.vector_store import recall as recall_tm
+
+# ---------------------------------------------------------------------------
+# Helper utilities (memory prompt construction – copied from legacy translator)
+# ---------------------------------------------------------------------------
+
+def _memory_block(mem: List[Dict[str, Any]], k: int | None = None) -> str:
+    """Return numbered summaries of previous translations for anti-repetition."""
+    config = get_config_loader()
+    if k is None:
+        k = int(config.get_setting('DEFAULT_RECALL_K'))
+    max_chars = int(config.get_setting('MEMORY_SUMMARY_MAX_CHARS'))
+    block: List[str] = []
+    for i, m in enumerate(mem[:k], 1):
+        summary = (m['translation_text'].split('.')[0])[:max_chars].strip()
+        block.append(f"{i}. {summary} → {m['message_url']}")
+    return "\n".join(block)
+
+# ---------------------------------------------------------------------------
+# AutoGen Translation System
+# ---------------------------------------------------------------------------
+
+class AutoGenTranslationSystem:
+    """Run a two-agent Translator+Editor conversation and return final result."""
+
+    def __init__(self) -> None:
+        self.config = get_config_loader()
+        self.ai_config = self.config.get_ai_model_config()
+
+        # Model client (Anthropic Claude vs OpenAI)
+        model_id = self.ai_config['model_id']
+        if model_id.startswith('claude'):
+            self.model_client = AnthropicChatCompletionClient(
+                model=model_id,
+                api_key=os.getenv('ANTHROPIC_API_KEY'),
+                extra_create_args={
+                    "thinking": {"budget_tokens": 10_000}
+                },
+            )
+        else:
+            self.model_client = OpenAIChatCompletionClient(
+                model=model_id,
+                api_key=os.getenv('OPENAI_API_KEY'),
+            )
+
+        # Prompts stored in DB
+        self.base_translator_prompt = self.config.get_prompt('autogen_translator')
+        self.editor_prompt = self.config.get_prompt('autogen_editor')
+
+        # Conversation settings
+        self.max_cycles = 2  # hard cap – user + 2 rounds → 5 messages total
+
+    # ---------------------------------------------------------------------
+    async def run(self, article: str, memories: List[Dict[str, Any]]) -> Tuple[str, str]:
+        """Return (final_translation, conversation_log)."""
+        # Build translator system message with memory context
+        memory_context = _memory_block(memories) if memories else "Нет предыдущих постов."
+        translator_prompt = self.base_translator_prompt
+        if '{memory_list' in translator_prompt:
+            translator_prompt = translator_prompt.format(memory_list=memory_context)
+        else:
+            translator_prompt = f"{translator_prompt}\n\n🔎 Память:\n{memory_context}"
+
+        translator = AssistantAgent(
+            name="Translator",
+            model_client=self.model_client,
+            system_message=translator_prompt,
+        )
+        editor = AssistantAgent(
+            name="Editor",
+            model_client=self.model_client,
+            system_message=self.editor_prompt,
+        )
+
+        team = RoundRobinGroupChat(
+            [translator, editor],
+            termination_condition=MaxMessageTermination(self.max_cycles * 2 + 1),
+        )
+
+        messages: List[Any] = []
+        async for event in team.run_stream(task=article):
+            # Collect only TextMessage events (skip TaskResult etc.)
+            if getattr(event, 'content', None):
+                messages.append(event)
+
+        # Build conversation log (source, text)
+        log_parts: List[str] = []
+        final_translation = ""
+        for msg in messages:
+            source = getattr(msg, 'source', 'unknown')
+            text = str(msg.content)
+            log_parts.append(f"{source}: {text}")
+            if source == 'Translator':
+                final_translation = text  # last translator message wins
+
+        conversation_log = "\n\n".join(log_parts)
+
+        # Ensure semantic links are present – append first 3 memory URLs as markdown links
+        if memories:
+            link_lines = []
+            for idx, m in enumerate(memories[:3], 1):
+                url = m.get('message_url')
+                if url and url.startswith('https://t.me/'):
+                    link_lines.append(f"🔗 [Источник {idx}]({url})")
+            if link_lines:
+                final_translation += "\n\n" + "\n".join(link_lines)
+
+        return final_translation, conversation_log
+
+# ---------------------------------------------------------------------------
+# Public API used by bot/tests – mirrors legacy signature
+# ---------------------------------------------------------------------------
+
+async def translate_and_link(_unused_client, src_text: str, mem: List[Dict[str, Any]]):
+    """Async wrapper matching old signature -> returns translation, conversation_log."""
+    system = AutoGenTranslationSystem()
+    translation, conversation_log = await system.run(src_text, mem)
+
+    # Save pair to vector store (translation memory) – same as legacy behaviour
+    from app.vector_store import save_pair as store_tm  # local import to avoid cycles
+    store_tm(src_text, translation, conversation_log=conversation_log)
+
+    return translation, conversation_log
+
+# Streaming variant currently unused in tests – raise to keep fail-fast behaviour.
+async def translate_and_link_streaming(*args, **kwargs):  # noqa: ANN001
+    raise RuntimeError("Streaming translation not implemented for AutoGen pipeline – use translate_and_link") 
