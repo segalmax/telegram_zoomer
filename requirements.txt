@@ -48,3 +48,4 @@ django-import-export==4.3.4
 psycopg2-binary==2.9.10
 autogen-agentchat>=0.6.4
 autogen-ext[anthropic]>=0.6.4
+tiktoken>=0.6.0
