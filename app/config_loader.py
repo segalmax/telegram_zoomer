@@ -1,23 +1,13 @@
 """
 Simple configuration loader for telegram_zoomer bot.
-Reads configuration from Django database models.
+Reads configuration from Supabase REST API.
 FAILS LOUDLY when configuration is missing - no defensive coding!
 """
 
 import os
-import sys
-import django
+import httpx
 from typing import Any, Dict, Optional
-
-# Configure Django
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config_admin.settings')
-django.setup()
-
-from bot_config.models import (
-    ConfigSetting, TranslationPrompt, AIModelConfig, 
-    ProcessingLimits, TranslationMemoryConfig, ArticleExtractionConfig,
-    MessageTemplate, EnvironmentConfig
-)
+import json
 
 
 class ConfigurationError(Exception):
@@ -27,13 +17,44 @@ class ConfigurationError(Exception):
 
 class ConfigLoader:
     """
-    Primitive configuration loader.
+    Primitive configuration loader using Supabase REST API.
     NO defensive coding - fails loudly when config missing!
     """
     
     def __init__(self):
         self._cache: Dict[str, Any] = {}
         self._environment = os.getenv('ENVIRONMENT', 'dev')
+        
+        # Supabase connection details
+        self.supabase_url = os.getenv('SUPABASE_URL')
+        self.supabase_key = os.getenv('SUPABASE_KEY')
+        
+        assert self.supabase_url, "SUPABASE_URL environment variable is required"
+        assert self.supabase_key, "SUPABASE_KEY environment variable is required"
+        
+        self.headers = {
+            'apikey': self.supabase_key,
+            'Authorization': f'Bearer {self.supabase_key}',
+            'Content-Type': 'application/json'
+        }
+    
+    def _rest_get(self, table: str, filters: Dict[str, str] = None) -> Dict[str, Any]:
+        """Make a REST API call to Supabase."""
+        url = f"{self.supabase_url}/rest/v1/{table}"
+        
+        params = {}
+        if filters:
+            for key, value in filters.items():
+                params[f"{key}"] = f"eq.{value}"
+        
+        response = httpx.get(url, headers=self.headers, params=params)
+        response.raise_for_status()
+        
+        data = response.json()
+        if not data:
+            raise ConfigurationError(f"No data found in {table} with filters {filters}")
+        
+        return data[0] if isinstance(data, list) else data
     
     def get_setting(self, key: str) -> Any:
         """Get a configuration setting by key. FAILS if missing."""
@@ -41,10 +62,23 @@ class ConfigLoader:
         
         if cache_key not in self._cache:
             try:
-                setting = ConfigSetting.objects.get(key=key)
-                self._cache[cache_key] = setting.get_typed_value()
-            except ConfigSetting.DoesNotExist:
-                raise ConfigurationError(f"Configuration setting '{key}' not found in database!")
+                setting = self._rest_get("bot_config_configsetting", {"key": key})
+                value = setting['value']
+                
+                # Type conversion based on value_type
+                value_type = setting.get('value_type', 'str')
+                if value_type == 'int':
+                    value = int(value)
+                elif value_type == 'float':
+                    value = float(value)
+                elif value_type == 'bool':
+                    value = value.lower() in ('true', '1', 'yes', 'on')
+                elif value_type == 'json':
+                    value = json.loads(value)
+                
+                self._cache[cache_key] = value
+            except Exception as e:
+                raise ConfigurationError(f"Configuration setting '{key}' not found in database: {e}")
         
         return self._cache[cache_key]
     
@@ -54,14 +88,12 @@ class ConfigLoader:
         
         if cache_key not in self._cache:
             try:
-                prompt = TranslationPrompt.objects.get(name=name, is_active=True)
-                self._cache[cache_key] = prompt.content
-            except TranslationPrompt.DoesNotExist:
-                raise ConfigurationError(f"Translation prompt '{name}' not found in database!")
+                prompt = self._rest_get("bot_config_translationprompt", {"name": name, "is_active": "true"})
+                self._cache[cache_key] = prompt['content']
+            except Exception as e:
+                raise ConfigurationError(f"Translation prompt '{name}' not found in database: {e}")
         
         return self._cache[cache_key]
-    
-
     
     def get_ai_model_config(self) -> Dict[str, Any]:
         """Get the default AI model configuration. FAILS if missing."""
@@ -69,16 +101,16 @@ class ConfigLoader:
         
         if cache_key not in self._cache:
             try:
-                model = AIModelConfig.objects.get(is_default=True)
+                model = self._rest_get("bot_config_aimodelconfig", {"is_default": "true"})
                 self._cache[cache_key] = {
-                    'model_id': model.model_id,
-                    'max_tokens': model.max_tokens,
-                    'temperature': model.temperature,
-                    'thinking_budget_tokens': model.thinking_budget_tokens,
-                    'timeout_seconds': model.timeout_seconds
+                    'model_id': model['model_id'],
+                    'max_tokens': model['max_tokens'],
+                    'temperature': model['temperature'],
+                    'thinking_budget_tokens': model['thinking_budget_tokens'],
+                    'timeout_seconds': model['timeout_seconds']
                 }
-            except AIModelConfig.DoesNotExist:
-                raise ConfigurationError("No default AI model configuration found in database!")
+            except Exception as e:
+                raise ConfigurationError(f"No default AI model configuration found in database: {e}")
         
         return self._cache[cache_key]
     
@@ -88,17 +120,17 @@ class ConfigLoader:
         
         if cache_key not in self._cache:
             try:
-                limits = ProcessingLimits.objects.get(environment=self._environment)
+                limits = self._rest_get("bot_config_processinglimits", {"environment": self._environment})
                 self._cache[cache_key] = {
-                    'batch_timeout_seconds': limits.batch_timeout_seconds,
-                    'batch_message_limit': limits.batch_message_limit,
-                    'fetch_timeout_seconds': limits.fetch_timeout_seconds,
-                    'processing_timeout_seconds': limits.processing_timeout_seconds,
-                    'rate_limit_sleep_seconds': limits.rate_limit_sleep_seconds,
-                    'timeout_buffer_seconds': limits.timeout_buffer_seconds
+                    'batch_timeout_seconds': limits['batch_timeout_seconds'],
+                    'batch_message_limit': limits['batch_message_limit'],
+                    'fetch_timeout_seconds': limits['fetch_timeout_seconds'],
+                    'processing_timeout_seconds': limits['processing_timeout_seconds'],
+                    'rate_limit_sleep_seconds': limits['rate_limit_sleep_seconds'],
+                    'timeout_buffer_seconds': limits['timeout_buffer_seconds']
                 }
-            except ProcessingLimits.DoesNotExist:
-                raise ConfigurationError(f"Processing limits for environment '{self._environment}' not found in database!")
+            except Exception as e:
+                raise ConfigurationError(f"Processing limits for environment '{self._environment}' not found in database: {e}")
         
         return self._cache[cache_key]
     
@@ -108,16 +140,16 @@ class ConfigLoader:
         
         if cache_key not in self._cache:
             try:
-                config = TranslationMemoryConfig.objects.get(is_active=True)
+                config = self._rest_get("bot_config_translationmemoryconfig", {"is_active": "true"})
                 self._cache[cache_key] = {
-                    'default_recall_k': config.default_recall_k,
-                    'overfetch_multiplier': config.overfetch_multiplier,
-                    'recency_weight': config.recency_weight,
-                    'embedding_model': config.embedding_model,
-                    'embedding_timeout_seconds': config.embedding_timeout_seconds
+                    'default_recall_k': config['default_recall_k'],
+                    'overfetch_multiplier': config['overfetch_multiplier'],
+                    'recency_weight': config['recency_weight'],
+                    'embedding_model': config['embedding_model'],
+                    'embedding_timeout_seconds': config['embedding_timeout_seconds']
                 }
-            except TranslationMemoryConfig.objects.DoesNotExist:
-                raise ConfigurationError("Active translation memory configuration not found in database!")
+            except Exception as e:
+                raise ConfigurationError(f"Active translation memory configuration not found in database: {e}")
         
         return self._cache[cache_key]
     
@@ -127,14 +159,14 @@ class ConfigLoader:
         
         if cache_key not in self._cache:
             try:
-                config = ArticleExtractionConfig.objects.get(domain=domain, is_active=True)
+                config = self._rest_get("bot_config_articleextractionconfig", {"domain": domain, "is_active": "true"})
                 self._cache[cache_key] = {
-                    'language_code': config.language_code,
-                    'min_article_length': config.min_article_length,
-                    'timeout_seconds': config.timeout_seconds
+                    'language_code': config['language_code'],
+                    'min_article_length': config['min_article_length'],
+                    'timeout_seconds': config['timeout_seconds']
                 }
-            except ArticleExtractionConfig.DoesNotExist:
-                raise ConfigurationError(f"Article extraction config for domain '{domain}' not found in database!")
+            except Exception as e:
+                raise ConfigurationError(f"Article extraction config for domain '{domain}' not found in database: {e}")
         
         return self._cache[cache_key]
     
@@ -144,10 +176,10 @@ class ConfigLoader:
         
         if cache_key not in self._cache:
             try:
-                template = MessageTemplate.objects.get(name=name, is_active=True)
-                self._cache[cache_key] = template.template
-            except MessageTemplate.DoesNotExist:
-                raise ConfigurationError(f"Message template '{name}' not found in database!")
+                template = self._rest_get("bot_config_messagetemplate", {"name": name, "is_active": "true"})
+                self._cache[cache_key] = template['template']
+            except Exception as e:
+                raise ConfigurationError(f"Message template '{name}' not found in database: {e}")
         
         return self._cache[cache_key]
     
@@ -157,14 +189,14 @@ class ConfigLoader:
         
         if cache_key not in self._cache:
             try:
-                config = EnvironmentConfig.objects.get(environment=self._environment, is_active=True)
+                config = self._rest_get("bot_config_environmentconfig", {"environment": self._environment, "is_active": "true"})
                 self._cache[cache_key] = {
-                    'session_name_pattern': config.session_name_pattern,
-                    'log_level': config.log_level,
-                    'log_format': config.log_format
+                    'session_name_pattern': config['session_name_pattern'],
+                    'log_level': config['log_level'],
+                    'log_format': config['log_format']
                 }
-            except EnvironmentConfig.DoesNotExist:
-                raise ConfigurationError(f"Environment configuration for '{self._environment}' not found in database!")
+            except Exception as e:
+                raise ConfigurationError(f"Environment configuration for '{self._environment}' not found in database: {e}")
         
         return self._cache[cache_key]
     
