@@ -90,9 +90,11 @@ class AutoGenTranslationSystem:
             system_message=self.editor_prompt,
         )
 
+        # Allow enough messages for: user + Translator + Editor + Translator (final)
+        # Increase limit to ensure Translator gets final word
         team = RoundRobinGroupChat(
             [translator, editor],
-            termination_condition=MaxMessageTermination(self.max_cycles * 2 + 1),
+            termination_condition=MaxMessageTermination(6),  # user + T + E + T + safety buffer
         )
 
         messages: List[Any] = []
