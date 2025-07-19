@@ -253,14 +253,9 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
         message_link = f"https://t.me/{SRC_CHANNEL.replace('@', '')}/{message_id}" if message_id else "Unknown source"
         logger.info(f"Original message link: {message_link}")
 
-        # Include both the original message link and any extracted URLs from message entities
+        # Include only the original message link  
         # Format as hyperlinks to hide the full URLs
         source_footer = f"\n\n🔗 [Оригинал:]({message_link})"
-        
-        # Add extracted links from message entities if available
-        if message_entity_urls and len(message_entity_urls) > 0:
-            source_footer += f"\n🔗 [Ссылка из статьи]({message_entity_urls[0]})"
-            logger.info(f"Including extracted URL from message: {message_entity_urls[0]}")
         
         async def send_message_parts(channel, text_content):
             """Send message parts and return the sent message object for navigation link tracking."""

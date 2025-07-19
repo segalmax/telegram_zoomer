@@ -162,16 +162,7 @@ class AutoGenTranslationSystem:
 
         conversation_log = "\n\n".join(log_parts)
 
-        # Ensure semantic links are present – append first 3 memory URLs as markdown links
-        if memories:
-            link_lines = []
-            for idx, m in enumerate(memories[:3], 1):
-                url = m.get('message_url')
-                if url and url.startswith('https://t.me/'):
-                    link_lines.append(f"🔗 [Источник {idx}]({url})")
-            if link_lines:
-                final_translation += "\n\n" + "\n".join(link_lines)
-
+        # Let AI handle all link placement - no automatic footer links
         return final_translation, conversation_log
 
 # ---------------------------------------------------------------------------
