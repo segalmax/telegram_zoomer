@@ -34,19 +34,9 @@ import pytest # Added pytest
 import app.bot
 from app.translator import get_anthropic_client, translate_and_link
 
-# Original bot.main is renamed to bot_main_entry for clarity to avoid confusion with this script's previous main
-from app.bot import main as bot_main_entry, translate_and_post as original_bot_translate_and_post
-
-
-# Try to import Telegram if needed
-try:
-    from telethon import TelegramClient
-    from telethon.network import ConnectionTcpAbridged
-    from telethon import events
-    TELETHON_AVAILABLE = True
-except ImportError:
-    TELETHON_AVAILABLE = False
-    # Pytest will skip tests that require telethon if this is False
+from telethon import TelegramClient
+from telethon.network import ConnectionTcpAbridged
+from telethon import events
 
 # Load environment variables
 # project_root should be the actual project root, not tests/
@@ -65,10 +55,11 @@ logger = logging.getLogger(__name__) # Use __name__ for specific logger
 # Configuration
 ANTHROPIC_KEY = os.getenv('ANTHROPIC_API_KEY')
 TEST_MESSAGE = (
-    "BREAKING NEWS: Scientists discover remarkable new species of bioluminescent deep-sea creatures "
-    "near hydrothermal vents in the Pacific Ocean. The colorful organisms have evolved unique "
-    "adaptations to extreme pressure and toxic chemicals that could provide insights into early life on Earth. "
-    "Read more at https://www.nytimes.com/2023/05/06/science/deep-sea-creatures.html"
+    '''
+15.7.25 |י"ט בתמוז התשפ"ה
+הזעקה מהמחוז המדמם בסוריה - ואזהרת המשטר לישראל: "אחראית להשלכות התקיפות"
+משרד החוץ הסורי נגד ישראל, שעות לאחר התקיפות במחוז הדרוזי א-סווידא: "יש לה אחריות מלאה למתקפה". תושבים באזור דיווחו על כאוס ברחובות, אחד מהם סיפר ל-ynet: "הם באו לשדוד ולשרוף - גם את הבית שלי"
+'''
 )
 
 API_ID = os.getenv('TG_API_ID')
@@ -140,7 +131,6 @@ async def verify_message_in_channel(client, channel, content_fragment, timeout=3
 @pytest.mark.asyncio
 async def test_telegram_pipeline(test_args):
     """Run the Telegram pipeline test."""
-    assert TELETHON_AVAILABLE, "Telethon is required but not available. Please install with: pip install telethon"
     if not all([API_ID, API_HASH, TG_PHONE, TEST_SRC_CHANNEL, TEST_DST_CHANNEL]):
         pytest.fail("Missing Telegram credentials or test channels. Check .env and ensure TEST_SRC_CHANNEL/TEST_DST_CHANNEL are set.")
 

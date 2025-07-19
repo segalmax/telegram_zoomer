@@ -127,8 +127,8 @@ def save_pair(
         logger.error(f"💥 vector_store.save_pair failed for {pair_id}: {e}", exc_info=True)
 
 
-def recall(src: str, k: int = 10) -> List[Dict[str, Any]]:
-    """Return ≤k most relevant past pairs. Fails if store unavailable or invalid input."""
+def recall(src: str, k: int = 10, channel_name: str | None = None) -> List[Dict[str, Any]]:
+    """Return ≤k most relevant past pairs. Optionally restrict to a specific channel name."""
     assert src, "Source text is required for recall"
     
     logger.debug(f"🧠 Starting recall: k={k}, src_len={len(src)}")
@@ -151,6 +151,9 @@ def recall(src: str, k: int = 10) -> List[Dict[str, Any]]:
         db_time = time.time() - db_start
         
         raw_results = res.data or []  # type: ignore
+        # Optional channel filter
+        if channel_name is not None:
+            raw_results = [r for r in raw_results if r.get("channel_name") == channel_name]
         logger.debug(f"🧠 DB query in {db_time:.3f}s, fetched {len(raw_results)} candidates for re-ranking")
         
         # ------------------------------------------------------------------

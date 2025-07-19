@@ -15,7 +15,8 @@ from telethon.network import ConnectionTcpAbridged
 from telethon.sessions import StringSession
 import anthropic
 from dotenv import load_dotenv
-from .translator import get_anthropic_client, translate_and_link
+from .translator import get_anthropic_client
+from .autogen_translation import translate_and_link
 from .config_loader import get_config_loader
 
 from .session_manager import setup_session, save_session_after_auth
@@ -27,6 +28,132 @@ from .vector_store import recall as recall_tm, save_pair as store_tm
 from .article_extractor import extract_article
 
 # Using translate_and_link for unified semantic linking
+
+class FlowCollector:
+    """Collects production flow details for debugging/analysis without affecting core logic"""
+    
+    def __init__(self):
+        self.steps = []
+        self.start_time = None
+        self.memory_query = None
+        self.article_extraction = None
+        self.autogen_conversation = None
+        self.performance_timing = {}
+        
+    def start_flow(self, source_text, message_id=None):
+        """Mark the start of translation flow"""
+        self.start_time = time.time()
+        self.log_step("flow_start", {
+            "source_text_preview": source_text[:100] + "..." if len(source_text) > 100 else source_text,
+            "source_text_length": len(source_text),
+            "message_id": message_id,
+            "timestamp": datetime.now().isoformat()
+        })
+    
+    def log_memory_query(self, query_text, memory_results, query_time):
+        """Log translation memory query details"""
+        similarities = [m.get('similarity', 0.0) for m in memory_results] if memory_results else []
+        
+        self.memory_query = {
+            "query_text_preview": query_text[:100] + "..." if len(query_text) > 100 else query_text,
+            "results_count": len(memory_results) if memory_results else 0,
+            "query_time_seconds": query_time,
+            "similarities": similarities,
+            "avg_similarity": sum(similarities) / len(similarities) if similarities else 0,
+            "max_similarity": max(similarities) if similarities else 0,
+            "min_similarity": min(similarities) if similarities else 0,
+            "memory_preview": [
+                {
+                    "source_preview": m.get('source_text', '')[:60] + "..." if len(m.get('source_text', '')) > 60 else m.get('source_text', ''),
+                    "translation_preview": m.get('translation_text', '')[:60] + "..." if len(m.get('translation_text', '')) > 60 else m.get('translation_text', ''),
+                    "similarity": m.get('similarity', 0.0)
+                }
+                for m in (memory_results[:5] if memory_results else [])  # First 5 for preview
+            ]
+        }
+        
+        self.log_step("memory_query", self.memory_query)
+    
+    def log_article_extraction(self, url, article_text, extraction_success):
+        """Log article extraction details"""
+        self.article_extraction = {
+            "url": url,
+            "extraction_success": extraction_success,
+            "article_length": len(article_text) if article_text else 0,
+            "article_preview": article_text[:200] + "..." if article_text and len(article_text) > 200 else article_text
+        }
+        
+        self.log_step("article_extraction", self.article_extraction)
+    
+    def log_autogen_start(self, translation_context, memory_count):
+        """Log start of AutoGen conversation"""
+        self.autogen_conversation = {
+            "context_length": len(translation_context),
+            "memory_count": memory_count,
+            "start_time": time.time(),
+            "conversation_messages": [],
+            "initial_context_preview": translation_context[:300] + "..." if len(translation_context) > 300 else translation_context
+        }
+        
+        self.log_step("autogen_start", {
+            "context_length": len(translation_context),
+            "memory_count": memory_count
+        })
+    
+    def log_autogen_result(self, linked_text, conversation_log, translation_time):
+        """Log AutoGen conversation completion"""
+        if self.autogen_conversation:
+            self.autogen_conversation.update({
+                "final_translation": linked_text,
+                "conversation_log": conversation_log,
+                "translation_time_seconds": translation_time,
+                "end_time": time.time()
+            })
+        
+        self.log_step("autogen_complete", {
+            "final_translation_length": len(linked_text),
+            "translation_time_seconds": translation_time,
+            "conversation_log_length": len(conversation_log) if conversation_log else 0
+        })
+    
+    def log_final_content(self, final_content):
+        """Log the final content that would be posted to Telegram"""
+        self.final_posted_content = final_content
+        self.log_step("final_content", {
+            "content_length": len(final_content),
+            "content_preview": final_content[:300] + "..." if len(final_content) > 300 else final_content
+        })
+    
+    def log_step(self, step_name, details):
+        """Log a flow step with timing"""
+        current_time = time.time()
+        elapsed = current_time - self.start_time if self.start_time else 0
+        
+        step = {
+            "step_name": step_name,
+            "timestamp": datetime.now().isoformat(),
+            "elapsed_seconds": elapsed,
+            "details": details
+        }
+        
+        self.steps.append(step)
+        
+        # Update performance timing
+        self.performance_timing[step_name] = elapsed
+    
+    def get_flow_summary(self):
+        """Get complete flow summary for analysis"""
+        total_time = time.time() - self.start_time if self.start_time else 0
+        
+        return {
+            "total_time_seconds": total_time,
+            "steps": self.steps,
+            "memory_query": self.memory_query,
+            "article_extraction": self.article_extraction,
+            "autogen_conversation": self.autogen_conversation,
+            "performance_timing": self.performance_timing,
+            "final_posted_content": getattr(self, 'final_posted_content', None)
+        }
 
 # Initialize configuration loader
 config = get_config_loader()
@@ -107,12 +234,15 @@ else:
     logger.error("ANTHROPIC_API_KEY not found. Translation functions will fail.")
     # Decide if this is fatal or if bot can run without Anthropic (e.g. only relaying)
 
-async def translate_and_post(client_instance, txt, message_id=None, destination_channel=None, message_entity_urls=None):
+async def translate_and_post(client_instance, txt, message_id=None, destination_channel=None, message_entity_urls=None, flow_collector=None):
     # Renamed client to client_instance to avoid conflict with openai_client module
     try:
         start_time = time.time()
         logger.info(f"Starting translation and posting for message ID: {message_id}")
         
+        # Initialize flow logging if collector provided
+        if flow_collector:
+            flow_collector.start_flow(txt, message_id)
 
         
         dst_channel_to_use = destination_channel or DST_CHANNEL
@@ -145,12 +275,17 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
         # ------------- translation-memory context ----------------
         translation_context = txt
         memory_start_time = time.time()
+        memory = None
         try:
             logger.info(f"🧠 Querying translation memory for message {message_id} (k=10)")
             logger.debug(f"🔍 Query text preview: {txt[:100]}...")
             
-            memory = recall_tm(txt, k=10)  # Increased from k=5 to k=10
+            memory = recall_tm(txt, k=10, channel_name="nytzoomeru")
             memory_query_time = time.time() - memory_start_time
+            
+            # Log memory query to flow collector
+            if flow_collector:
+                flow_collector.log_memory_query(txt, memory, memory_query_time)
             
             if memory:
                 logger.info(f"✅ Found {len(memory)} relevant memories in {memory_query_time:.3f}s")
@@ -185,6 +320,9 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
         except Exception as e:
             memory_query_time = time.time() - memory_start_time
             logger.error(f"💥 TM recall failed for message {message_id} after {memory_query_time:.3f}s: {e}", exc_info=True)
+            # Log failed memory query to flow collector
+            if flow_collector:
+                flow_collector.log_memory_query(txt, None, memory_query_time)
         
         # Append article content (runs after TM injection, before translation)
         if message_entity_urls and len(message_entity_urls) > 0:
@@ -192,15 +330,32 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
             if article_text:
                 translation_context += f"\n\nArticle content from {message_entity_urls[0]}:\n{article_text}"
                 logger.info(f"Added article content ({len(article_text)} chars) to translation context")
+                # Log successful article extraction to flow collector
+                if flow_collector:
+                    flow_collector.log_article_extraction(message_entity_urls[0], article_text, True)
             else:
                 translation_context += f"\n\nNote: This message contains a link: {message_entity_urls[0]}"
                 logger.info("Article extraction failed, using fallback link mention")
+                # Log failed article extraction to flow collector
+                if flow_collector:
+                    flow_collector.log_article_extraction(message_entity_urls[0], None, False)
         
         # Always use modern Lurkmore style for Israeli Russian audience (only style supported)
         logger.info("Translating in modern Lurkmore style for Israeli Russian audience with editorial system...")
         translation_start = time.time()
-        linked_text, conversation_log = await translate_and_link(anthropic_client, translation_context, memory)
+        
+        # Log AutoGen start to flow collector
+        if flow_collector:
+            memory_count = len(memory) if memory else 0
+            flow_collector.log_autogen_start(translation_context, memory_count)
+        
+        linked_text, conversation_log = await translate_and_link(anthropic_client, translation_context, memory, flow_collector)
         translation_time_ms = int((time.time() - translation_start) * 1000)
+        
+        # Log AutoGen completion to flow collector
+        if flow_collector:
+            translation_time_seconds = translation_time_ms / 1000
+            flow_collector.log_autogen_result(linked_text, conversation_log, translation_time_seconds)
         
 
 
@@ -214,6 +369,11 @@ async def translate_and_post(client_instance, txt, message_id=None, destination_
         
         right_content = f"{invisible_article_link}{linked_text}{source_footer}"
         logger.info(f"📝 Final post content preview: {right_content[:200]}...")
+        
+        # Log final content to flow collector
+        if flow_collector:
+            flow_collector.log_final_content(right_content)
+        
         sent_message = await send_message_parts(dst_channel_to_use, right_content)
         logger.info(f"Posted modern Lurkmore style version")
         

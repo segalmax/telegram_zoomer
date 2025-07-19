@@ -12,7 +12,6 @@ from autogen_agentchat.agents import AssistantAgent
 from autogen_agentchat.teams import RoundRobinGroupChat
 from autogen_agentchat.conditions import MaxMessageTermination
 from autogen_agentchat.ui import Console
-from autogen_ext.models.openai import OpenAIChatCompletionClient
 from autogen_ext.models.anthropic import AnthropicChatCompletionClient
 
 from app.config_loader import get_config_loader
@@ -45,6 +44,14 @@ class AutoGenTranslationSystem:
         self.config = get_config_loader()
         self.ai_config = self.config.get_ai_model_config()
 
+        # Check for temporary environment variable overrides (for Streamlit Studio mode)
+        if os.getenv('TEMP_ANTHROPIC_MODEL_ID'):
+            self.ai_config['model_id'] = os.getenv('TEMP_ANTHROPIC_MODEL_ID')
+        if os.getenv('TEMP_ANTHROPIC_MAX_TOKENS'):
+            self.ai_config['max_tokens'] = int(os.getenv('TEMP_ANTHROPIC_MAX_TOKENS'))
+        if os.getenv('TEMP_ANTHROPIC_TEMPERATURE'):
+            self.ai_config['temperature'] = float(os.getenv('TEMP_ANTHROPIC_TEMPERATURE'))
+
         # Model client (Anthropic Claude vs OpenAI)
         model_id = self.ai_config['model_id']
         if model_id.startswith('claude'):
@@ -55,53 +62,75 @@ class AutoGenTranslationSystem:
                     "thinking": {"budget_tokens": 10_000}
                 },
             )
-        else:
-            self.model_client = OpenAIChatCompletionClient(
-                model=model_id,
-                api_key=os.getenv('OPENAI_API_KEY'),
-            )
+        else:#not implemented
+            raise ValueError(f"Model {model_id} not supported")
 
-        # Prompts stored in DB
-        self.base_translator_prompt = self.config.get_prompt('autogen_translator')
-        self.editor_prompt = self.config.get_prompt('autogen_editor')
+        # Prompts stored in DB (with potential overrides for Streamlit Studio mode)
+        self.base_translator_prompt = os.getenv('TEMP_TRANSLATOR_PROMPT') or self.config.get_prompt('autogen_translator')
+        self.editor_prompt = os.getenv('TEMP_EDITOR_PROMPT') or self.config.get_prompt('autogen_editor')
 
         # Conversation settings
         self.max_cycles = 2  # hard cap – user + 2 rounds → 5 messages total
 
     # ---------------------------------------------------------------------
-    async def run(self, article: str, memories: List[Dict[str, Any]]) -> Tuple[str, str]:
+    async def run(self, article: str, memories: List[Dict[str, Any]], flow_collector=None) -> Tuple[str, str]:
         """Return (final_translation, conversation_log)."""
         # Build translator system message with memory context
         memory_context = _memory_block(memories) if memories else "Нет предыдущих постов."
-        translator_prompt = self.base_translator_prompt
+        # Shared Lurkmore guidelines – prepend to each agent's system prompt (library lacks group-level support)
+        shared_guidelines = self.config.get_prompt('lurkmore_complete_original_prompt')
+
+        translator_prompt = f"{shared_guidelines}\n\n{self.base_translator_prompt}"
         if '{memory_list' in translator_prompt:
             translator_prompt = translator_prompt.format(memory_list=memory_context)
         else:
             translator_prompt = f"{translator_prompt}\n\n🔎 Память:\n{memory_context}"
+
+        # Log initial prompts to flow collector
+        if flow_collector and flow_collector.autogen_conversation:
+            flow_collector.autogen_conversation['initial_translator_prompt'] = translator_prompt
+            flow_collector.autogen_conversation['initial_editor_prompt'] = self.editor_prompt
+            flow_collector.autogen_conversation['memory_context'] = memory_context
 
         translator = AssistantAgent(
             name="Translator",
             model_client=self.model_client,
             system_message=translator_prompt,
         )
+        editor_prompt_full = f"{shared_guidelines}\n\n{self.editor_prompt}"
         editor = AssistantAgent(
             name="Editor",
             model_client=self.model_client,
-            system_message=self.editor_prompt,
+            system_message=editor_prompt_full,
         )
 
-        # Allow enough messages for: user + Translator + Editor + Translator (final)
-        # Increase limit to ensure Translator gets final word
+        # Two-agent round robin
         team = RoundRobinGroupChat(
             [translator, editor],
             termination_condition=MaxMessageTermination(6),  # user + T + E + T + safety buffer
         )
 
         messages: List[Any] = []
+        conversation_messages = []  # For flow collector
+        
         async for event in team.run_stream(task=article):
             # Collect only TextMessage events (skip TaskResult etc.)
             if getattr(event, 'content', None):
                 messages.append(event)
+                
+                # Log each message to flow collector
+                if flow_collector:
+                    source = getattr(event, 'source', 'unknown')
+                    text = str(event.content)
+                    conversation_messages.append({
+                        'source': source,
+                        'content': text,
+                        'timestamp': getattr(event, 'timestamp', None)
+                    })
+
+        # Update flow collector with conversation messages
+        if flow_collector and flow_collector.autogen_conversation:
+            flow_collector.autogen_conversation['conversation_messages'] = conversation_messages
 
         # Build conversation log (source, text)
         log_parts: List[str] = []
@@ -131,10 +160,10 @@ class AutoGenTranslationSystem:
 # Public API used by bot/tests – mirrors legacy signature
 # ---------------------------------------------------------------------------
 
-async def translate_and_link(_unused_client, src_text: str, mem: List[Dict[str, Any]]):
+async def translate_and_link(_unused_client, src_text: str, mem: List[Dict[str, Any]], flow_collector=None):
     """Async wrapper matching old signature -> returns translation, conversation_log."""
     system = AutoGenTranslationSystem()
-    translation, conversation_log = await system.run(src_text, mem)
+    translation, conversation_log = await system.run(src_text, mem, flow_collector)
 
     # Save pair to vector store (translation memory) – same as legacy behaviour
     from app.vector_store import save_pair as store_tm  # local import to avoid cycles

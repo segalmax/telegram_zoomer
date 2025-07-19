@@ -22,8 +22,6 @@ from app.vector_store import recall as recall_tm, save_pair as store_tm  # Impor
 # Import Supabase for database operations
 from supabase import create_client, Client
 
-# For REAL AutoGen streaming
-from autogen_games import autogen_event_stream
 
 # Initialize config loader
 config = get_config_loader()
@@ -846,7 +844,7 @@ def run_live_translation_with_streaming(source_text, use_memory):
         memory_start_time = time.time()
         try:
             st.info(f"🧠 Querying translation memory for text (k=10)")
-            memory = recall_tm(source_text, k=10)  # Same as production bot
+            memory = recall_tm(source_text, k=10, channel_name="nytzoomeru")  # Filter to production channel
             memory_query_time = time.time() - memory_start_time
             
             if memory:
@@ -1359,9 +1357,267 @@ def run_live_translation_with_streaming(source_text, use_memory):
         with st.expander("🔍 Setup Error Details", expanded=True):
             st.code(traceback.format_exc(), language='python')
 
+def run_production_flow_translation(source_text, use_memory, settings_source="production"):
+    """Run translation using the EXACT production flow with flow logging"""
+    import sys
+    import asyncio
+    
+    # Import production components
+    try:
+        from app.bot import FlowCollector, translate_and_post
+        from app.translator import get_anthropic_client
+    except ImportError as e:
+        st.error(f"❌ Failed to import production components: {e}")
+        st.error("Make sure you're running from the correct directory and all dependencies are installed.")
+        return
+    
+    # Create flow collector to capture production flow
+    flow_collector = FlowCollector()
+    
+    # Get settings override if using studio settings
+    settings_override = None
+    if settings_source == "studio":
+        if 'db_settings' in st.session_state and st.session_state.db_settings:
+            settings_override = st.session_state.db_settings
+            st.markdown("### 🎛️ Production Flow with Studio Settings")
+            st.info("⚡ Running EXACT production flow with Studio UI settings override...")
+        else:
+            st.warning("⚠️ No Studio settings found. Using Production database settings.")
+            settings_source = "production"
+    
+    if settings_source == "production":
+        st.markdown("### 🔧 Production Flow with Database Settings")
+        st.info("⚡ Running EXACT production flow with Production database settings...")
+    
+    # Create containers for flow steps
+    flow_steps_container = st.empty()
+    flow_details_container = st.empty()
+    final_result_container = st.empty()
+    
+    async def run_production():
+        try:
+            # Create anthropic client
+            anthropic_key = os.getenv('ANTHROPIC_API_KEY')
+            if not anthropic_key:
+                st.error("❌ ANTHROPIC_API_KEY not found")
+                return
+            
+            anthropic_client = get_anthropic_client(anthropic_key)
+            
+            # Mock Telegram client (not needed for translation)
+            class MockTelegramClient:
+                async def send_message(self, channel, content, parse_mode=None):
+                    # Mock sent message for production flow
+                    class MockMessage:
+                        def __init__(self):
+                            self.id = "streamlit-test"
+                    return MockMessage()
+            
+            mock_client = MockTelegramClient()
+            
+            # Set environment variables for production flow
+            os.environ['DST_CHANNEL'] = '@test_channel'
+            
+            # Run the EXACT production translate_and_post function with flow collector
+            # For settings override, we'll need to temporarily modify the config
+            original_env = {}
+            if settings_override:
+                # Apply studio settings by temporarily setting environment variables
+                # This allows the production code to pick them up
+                from app.autogen_translation import AutoGenTranslationSystem
+                
+                # Store original environment
+                override_keys = [
+                    'TEMP_ANTHROPIC_MODEL_ID', 'TEMP_ANTHROPIC_MAX_TOKENS', 'TEMP_ANTHROPIC_TEMPERATURE',
+                    'TEMP_TRANSLATOR_PROMPT', 'TEMP_EDITOR_PROMPT'
+                ]
+                for key in override_keys:
+                    original_env[key] = os.environ.get(key)
+                
+                # Apply studio settings temporarily
+                ai_config = settings_override.get('ai_model', {})
+                if ai_config.get('model_id'):
+                    os.environ['TEMP_ANTHROPIC_MODEL_ID'] = ai_config['model_id']
+                if ai_config.get('max_tokens'):
+                    os.environ['TEMP_ANTHROPIC_MAX_TOKENS'] = str(ai_config['max_tokens'])
+                if ai_config.get('temperature'):
+                    os.environ['TEMP_ANTHROPIC_TEMPERATURE'] = str(ai_config['temperature'])
+                
+                # Apply studio prompts
+                prompts = settings_override.get('prompts', {})
+                if prompts.get('autogen_translator'):
+                    os.environ['TEMP_TRANSLATOR_PROMPT'] = prompts['autogen_translator']
+                if prompts.get('autogen_editor'):
+                    os.environ['TEMP_EDITOR_PROMPT'] = prompts['autogen_editor']
+            
+            try:
+                result = await translate_and_post(
+                    client_instance=mock_client,
+                    txt=source_text,
+                    message_id="streamlit-debug",
+                    destination_channel="@streamlit_debug",
+                    message_entity_urls=[],
+                    flow_collector=flow_collector
+                )
+            finally:
+                # Restore original environment
+                if settings_override:
+                    for key, value in original_env.items():
+                        if value is None:
+                            os.environ.pop(key, None)
+                        else:
+                            os.environ[key] = value
+            
+            # Get complete flow summary
+            flow_summary = flow_collector.get_flow_summary()
+            
+            return flow_summary, result
+            
+        except Exception as e:
+            st.error(f"❌ Production flow failed: {str(e)}")
+            import traceback
+            st.code(traceback.format_exc())
+            return None, None
+    
+    # Execute production flow
+    try:
+        flow_summary, result = asyncio.run(run_production())
+        
+        if flow_summary:
+            # Display flow steps timeline
+            with flow_steps_container.container():
+                st.markdown("### 📊 Production Flow Timeline")
+                
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("⏱️ Total Time", f"{flow_summary['total_time_seconds']:.2f}s")
+                with col2:
+                    st.metric("🔄 Flow Steps", len(flow_summary['steps']))
+                with col3:
+                    memory_count = flow_summary.get('memory_query', {}).get('results_count', 0)
+                    st.metric("🧠 Memory Results", memory_count)
+                with col4:
+                    settings_label = "🎛️ Studio" if settings_override else "🗄️ Production"
+                    st.metric("⚙️ Settings", settings_label)
+                
+                # Show step timeline
+                for i, step in enumerate(flow_summary['steps'], 1):
+                    with st.expander(f"Step {i}: {step['step_name'].title()} ({step['elapsed_seconds']:.2f}s)", expanded=i<=2):
+                        st.json(step['details'])
+            
+            # Display detailed flow analysis
+            with flow_details_container.container():
+                st.markdown("---")
+                st.markdown("### 🔍 Detailed Flow Analysis")
+                
+                # Memory Query Analysis
+                if flow_summary.get('memory_query'):
+                    st.markdown("#### 🧠 Translation Memory Query")
+                    memory_data = flow_summary['memory_query']
+                    
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.metric("Results Found", memory_data['results_count'])
+                    with col2:
+                        st.metric("Query Time", f"{memory_data['query_time_seconds']:.3f}s")
+                    with col3:
+                        st.metric("Avg Similarity", f"{memory_data['avg_similarity']:.3f}")
+                    with col4:
+                        st.metric("Max Similarity", f"{memory_data['max_similarity']:.3f}")
+                    
+                    if memory_data['memory_preview']:
+                        st.markdown("**Memory Previews:**")
+                        for i, preview in enumerate(memory_data['memory_preview'], 1):
+                            with st.expander(f"Memory {i} (similarity: {preview['similarity']:.3f})"):
+                                st.markdown(f"**Source:** {preview['source_preview']}")
+                                st.markdown(f"**Translation:** {preview['translation_preview']}")
+                
+                # Article Extraction Analysis
+                if flow_summary.get('article_extraction'):
+                    st.markdown("#### 📄 Article Extraction")
+                    article_data = flow_summary['article_extraction']
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.metric("Extraction Success", "✅" if article_data['extraction_success'] else "❌")
+                        if article_data['url']:
+                            st.markdown(f"**URL:** {article_data['url']}")
+                    with col2:
+                        if article_data['extraction_success']:
+                            st.metric("Article Length", f"{article_data['article_length']} chars")
+                            if article_data['article_preview']:
+                                st.text_area("Article Preview", article_data['article_preview'], height=100, disabled=True)
+                
+                # AutoGen Conversation Analysis  
+                if flow_summary.get('autogen_conversation'):
+                    st.markdown("#### 🤖 AutoGen Multi-Agent Conversation")
+                    autogen_data = flow_summary['autogen_conversation']
+                    
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Context Length", f"{autogen_data['context_length']} chars")
+                    with col2:
+                        st.metric("Memory Context", f"{autogen_data['memory_count']} items")
+                    with col3:
+                        if 'translation_time_seconds' in autogen_data:
+                            st.metric("Translation Time", f"{autogen_data['translation_time_seconds']:.2f}s")
+                    
+                    # Show initial prompts
+                    if 'initial_translator_prompt' in autogen_data:
+                        with st.expander("📝 Initial Translator Prompt"):
+                            st.code(autogen_data['initial_translator_prompt'], language='text')
+                    
+                    if 'initial_editor_prompt' in autogen_data:
+                        with st.expander("📝 Initial Editor Prompt"):
+                            st.code(autogen_data['initial_editor_prompt'], language='text')
+                    
+                    # Show conversation messages
+                    if 'conversation_messages' in autogen_data and autogen_data['conversation_messages']:
+                        st.markdown("**Agent Conversation:**")
+                        for i, msg in enumerate(autogen_data['conversation_messages'], 1):
+                            role_icon = "🔄" if msg['source'] == 'Translator' else "🧐"
+                            with st.expander(f"{role_icon} {msg['source']} - Message {i}"):
+                                st.markdown(msg['content'])
+                    
+                    # Show final translation
+                    if 'final_translation' in autogen_data:
+                        st.markdown("**Final Translation:**")
+                        st.markdown(autogen_data['final_translation'])
+            
+            # Show final result
+            with final_result_container.container():
+                st.markdown("---")
+                st.success("✅ Production Flow Analysis Complete!")
+                
+                # Show final posted content from flow collector
+                final_content = flow_summary.get('final_posted_content')
+                if final_content:
+                    st.markdown("### 📤 Production Result")
+                    st.info("This is what would be posted to the Telegram channel:")
+                    st.markdown("```markdown\n" + final_content + "\n```")
+                elif result:
+                    st.markdown("### 📤 Production Result")
+                    st.info("Translation completed successfully")
+                    st.warning("⚠️ Final content not captured in flow collector")
+                
+        else:
+            st.error("❌ Failed to capture production flow")
+            
+    except Exception as e:
+        st.error(f"❌ Critical error in production flow: {str(e)}")
+        import traceback
+        st.code(traceback.format_exc())
+
 def show_live_translation():
     """Main live translation interface"""
     st.markdown('<h1 class="main-header">🔥 Live Translation Studio</h1>', unsafe_allow_html=True)
+    
+    # Settings source selection
+    settings_source = st.radio(
+        "⚙️ Settings Source:",
+        ["🗄️ Production (Database)", "🎛️ Studio (UI Panel)"],
+        help="Production uses your bot's database settings. Studio uses the Settings panel for experimentation."
+    )
     
     # Create a form to enable Command+Enter functionality
     with st.form(key="translation_form", clear_on_submit=False):
@@ -1384,14 +1640,17 @@ def show_live_translation():
             use_memory = st.checkbox("Use Translation Memory", value=True)
         
         # Form submit button - triggered by Ctrl+Enter or Cmd+Enter
-        translate_clicked = st.form_submit_button("🚀 Start Live Translation", type="primary")
+        translate_clicked = st.form_submit_button("🚀 Run Production Flow", type="primary")
     
     # Execute translation when form is submitted (Cmd+Enter) or button clicked
     if translate_clicked:
         if source_text.strip():
             # Save the input for preloading next time
             st.session_state['last_article_input'] = source_text.strip()
-            run_live_translation_with_streaming(source_text.strip(), use_memory)
+            
+            # Always use production flow, but with selected settings source
+            settings_mode = "production" if settings_source == "🗄️ Production (Database)" else "studio"
+            run_production_flow_translation(source_text.strip(), use_memory, settings_mode)
         else:
             st.warning("⚠️ Please enter some text to translate")
 

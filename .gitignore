@@ -61,12 +61,7 @@ node_modules/
 tasks.json
 tasks/ 
 # MCP configuration with API keys (use mcp.json.example as template)
-.cursor/mcp.json
-.cursor/rules/cursor_rules.mdc
-.cursor/rules/dev_workflow.mdc
-.cursor/rules/self_improve.mdc
-.cursor/rules/taskmaster.mdc
+.cursor/*
 scripts/example_prd.txt
-.cache/41/cache.db
-.cache/41/cache.db-shm
-.cache/41/cache.db-wal
+.cache/*
+.vscode/*
