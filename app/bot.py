@@ -587,6 +587,7 @@ async def main():
     """
     parser = argparse.ArgumentParser(description='Telegram Zoomer Bot - Translate messages with Artemiy Lebedev style')
     parser.add_argument('--process-recent', type=int, help='Process the specified number of recent messages')
+    parser.add_argument('--translate-message', type=int, help='Translate a specific message ID from the source channel')
     args = parser.parse_args()
     
     try:
@@ -620,6 +621,45 @@ async def main():
             except Exception as e:
                 logger.warning(f"TEST_MODE pre-processing recent posts failed: {e}")
         
+        # Translate specific message if requested
+        if args.translate_message:
+            logger.info(f"Translating specific message ID: {args.translate_message}")
+            try:
+                # Get the specific message by ID
+                messages = await client.get_messages(SRC_CHANNEL, ids=args.translate_message)
+                if not messages:
+                    logger.error(f"Message ID {args.translate_message} not found in channel {SRC_CHANNEL}")
+                    return
+                
+                msg = messages[0] if isinstance(messages, list) else messages
+                if not msg.text:
+                    logger.error(f"Message ID {args.translate_message} has no text content")
+                    return
+                
+                logger.info(f"Found message: {msg.text[:100]}...")
+                
+                # Extract URLs from message entities
+                message_entity_urls = []
+                if hasattr(msg, 'entities') and msg.entities:
+                    for entity in msg.entities:
+                        if hasattr(entity, 'url') and entity.url:
+                            message_entity_urls.append(entity.url)
+                        elif hasattr(entity, '_') and entity._ in ('MessageEntityUrl', 'MessageEntityTextUrl'):
+                            if hasattr(entity, 'offset') and hasattr(entity, 'length'):
+                                url_text = msg.text[entity.offset:entity.offset + entity.length]
+                                if url_text.startswith('http'):
+                                    message_entity_urls.append(url_text)
+                
+                sent_message = await translate_and_post(client, msg.text, msg.id, message_entity_urls=message_entity_urls)
+                logger.info(f"Successfully translated message ID {args.translate_message}")
+                
+            except Exception as e:
+                logger.error(f"Failed to translate message ID {args.translate_message}: {e}", exc_info=True)
+            
+            logger.info("🏁 Exiting after translating specific message (not starting polling mode)")
+            await client.disconnect()  # Properly disconnect client to prevent hanging
+            return  # Exit after translating specific message
+        
         # Process recent messages if requested
         if args.process_recent and args.process_recent > 0:
             logger.info(f"Processing {args.process_recent} recent messages")
@@ -649,6 +689,7 @@ async def main():
             
             logger.info("Finished processing recent messages")
             logger.info("🏁 Exiting after processing recent messages (not starting polling mode)")
+            await client.disconnect()  # Properly disconnect client to prevent hanging
             return  # Exit after processing recent messages, don't start polling
         
         logger.info(f"Client ready, listening for new messages on: {SRC_CHANNEL}")

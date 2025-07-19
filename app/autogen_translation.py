@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Tuple
 
 from autogen_agentchat.agents import AssistantAgent
 from autogen_agentchat.teams import RoundRobinGroupChat
-from autogen_agentchat.conditions import MaxMessageTermination
+from autogen_agentchat.conditions import MaxMessageTermination, TextMentionTermination
 from autogen_agentchat.ui import Console
 from autogen_ext.models.anthropic import AnthropicChatCompletionClient
 
@@ -104,10 +104,10 @@ class AutoGenTranslationSystem:
             system_message=editor_prompt_full,
         )
 
-        # Two-agent round robin
+        # Two-agent round robin with approval-based termination (industry standard)
         team = RoundRobinGroupChat(
             [translator, editor],
-            termination_condition=MaxMessageTermination(6),  # user + T + E + T + safety buffer
+            termination_condition=TextMentionTermination("APPROVE"),  # Stop when editor approves
         )
 
         messages: List[Any] = []
@@ -132,15 +132,33 @@ class AutoGenTranslationSystem:
         if flow_collector and flow_collector.autogen_conversation:
             flow_collector.autogen_conversation['conversation_messages'] = conversation_messages
 
-        # Build conversation log (source, text)
+        # Build conversation log and extract approved translation (industry standard)
         log_parts: List[str] = []
         final_translation = ""
-        for msg in messages:
+        
+        # Find the approved translation (translator message before APPROVE signal)
+        for i, msg in enumerate(messages):
             source = getattr(msg, 'source', 'unknown')
             text = str(msg.content)
             log_parts.append(f"{source}: {text}")
-            if source == 'Translator':
-                final_translation = text  # last translator message wins
+            
+            # If this is an approval signal, use the previous translator message
+            if source == 'Editor' and 'APPROVE' in text:
+                # Look backwards for the most recent translator message
+                for j in range(i - 1, -1, -1):
+                    prev_msg = messages[j]
+                    prev_source = getattr(prev_msg, 'source', 'unknown')
+                    if prev_source == 'Translator':
+                        final_translation = str(prev_msg.content)
+                        break
+                break
+        
+        # Fallback: if no APPROVE found, use last translator message (shouldn't happen with TextMentionTermination)
+        if not final_translation:
+            for msg in messages:
+                source = getattr(msg, 'source', 'unknown')
+                if source == 'Translator':
+                    final_translation = str(msg.content)
 
         conversation_log = "\n\n".join(log_parts)
 
