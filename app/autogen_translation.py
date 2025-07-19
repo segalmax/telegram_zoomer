@@ -107,7 +107,7 @@ class AutoGenTranslationSystem:
         # Two-agent round robin with approval-based termination (industry standard)
         team = RoundRobinGroupChat(
             [translator, editor],
-            termination_condition=TextMentionTermination("APPROVE"),  # Stop when editor approves
+            termination_condition=TextMentionTermination("APPROVE") | MaxMessageTermination(4),  # Stop when editor approves or after 4 messages
         )
 
         messages: List[Any] = []
@@ -137,6 +137,7 @@ class AutoGenTranslationSystem:
         final_translation = ""
         
         # Find the approved translation (translator message before APPROVE signal)
+        approve_found = False
         for i, msg in enumerate(messages):
             source = getattr(msg, 'source', 'unknown')
             text = str(msg.content)
@@ -144,6 +145,7 @@ class AutoGenTranslationSystem:
             
             # If this is an approval signal, use the previous translator message
             if source == 'Editor' and 'APPROVE' in text:
+                approve_found = True
                 # Look backwards for the most recent translator message
                 for j in range(i - 1, -1, -1):
                     prev_msg = messages[j]
@@ -153,12 +155,16 @@ class AutoGenTranslationSystem:
                         break
                 break
         
-        # Fallback: if no APPROVE found, use last translator message (shouldn't happen with TextMentionTermination)
-        if not final_translation:
-            for msg in messages:
+        # If no APPROVE found, use the last translator message (conversation hit message limit)
+        if not approve_found:
+            # Find the last substantial translator message
+            for msg in reversed(messages):
                 source = getattr(msg, 'source', 'unknown')
                 if source == 'Translator':
-                    final_translation = str(msg.content)
+                    text = str(msg.content)
+                    # Use the last translator message as it should be the improved version
+                    final_translation = text
+                    break
 
         conversation_log = "\n\n".join(log_parts)
 
