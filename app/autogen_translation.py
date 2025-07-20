@@ -22,16 +22,23 @@ from app.vector_store import recall as recall_tm
 # ---------------------------------------------------------------------------
 
 def _memory_block(mem: List[Dict[str, Any]], k: int | None = None) -> str:
-    """Return numbered summaries of previous translations for anti-repetition."""
+    """Return full source articles for contextual linking decisions."""
     config = get_config_loader()
     if k is None:
         k = int(config.get_setting('DEFAULT_RECALL_K'))
-    max_chars = int(config.get_setting('MEMORY_SUMMARY_MAX_CHARS'))
+    
     block: List[str] = []
     for i, m in enumerate(mem[:k], 1):
-        summary = (m['translation_text'].split('.')[0])[:max_chars].strip()
-        block.append(f"{i}. {summary} → {m['message_url']}")
-    return "\n".join(block)
+        # Include FULL source article for proper contextual analysis
+        source_text = m.get('source_text', '').strip()
+        translation_text = m.get('translation_text', '').strip()
+        url = m.get('message_url', '')
+        
+        # Show full context: source + translation + URL
+        entry = f"{i}. ИСТОЧНИК: {source_text}\n   ПЕРЕВОД: {translation_text}\n   URL: {url}"
+        block.append(entry)
+    
+    return "\n\n".join(block)
 
 # ---------------------------------------------------------------------------
 # AutoGen Translation System
