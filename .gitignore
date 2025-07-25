@@ -37,7 +37,7 @@ logs/
 .dockerignore 
 
 # Virtual environment
-.venv/
+.venv*/
 
 # Added by Claude Task Master
 logs

@@ -17,14 +17,22 @@ Usage (pytest):
 import os
 import sys
 import uuid
+# Load environment variables FIRST before any imports that need them
+from pathlib import Path
+from dotenv import load_dotenv
+
+project_root = Path(__file__).resolve().parent.parent
+load_dotenv(dotenv_path=project_root / 'app_settings.env', override=True)
+load_dotenv(dotenv_path=project_root / '.env', override=False)
+
+# Now safe to import modules that need environment variables
 import asyncio
 import logging
 # import argparse # Replaced by pytest fixtures
 import time
 from io import BytesIO
-from dotenv import load_dotenv
+from app.autogen_translation import get_anthropic_client
 import openai
-from pathlib import Path
 import json
 import pytest # Added pytest
 
@@ -32,17 +40,11 @@ import pytest # Added pytest
 # Adjust sys.path if necessary, or install the app as a package
 # For now, direct import if 'app' is discoverable (e.g. via PYTHONPATH or project structure)
 import app.bot
-from app.translator import get_anthropic_client, translate_and_link
+from app.autogen_translation import translate_and_link
 
 from telethon import TelegramClient
 from telethon.network import ConnectionTcpAbridged
 from telethon import events
-
-# Load environment variables
-# project_root should be the actual project root, not tests/
-project_root = Path(__file__).resolve().parent.parent
-load_dotenv(dotenv_path=project_root / 'app_settings.env', override=True)
-load_dotenv(dotenv_path=project_root / '.env', override=False)
 
 # Configure logging
 logging.basicConfig(
@@ -50,6 +52,23 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(name)s - %(message)s', # Added name and levelname
     datefmt='%Y-%m-%d %H:%M:%S',
 )
+
+# Suppress verbose logging from external libraries
+logging.getLogger('urllib3').setLevel(logging.WARNING)
+logging.getLogger('httpx').setLevel(logging.WARNING) 
+logging.getLogger('httpcore').setLevel(logging.WARNING)
+logging.getLogger('httpcore.http11').setLevel(logging.WARNING)  # HTTP/1.1 connection logs
+logging.getLogger('anthropic').setLevel(logging.WARNING)
+logging.getLogger('openai').setLevel(logging.WARNING)
+logging.getLogger('autogen_agentchat').setLevel(logging.WARNING)
+logging.getLogger('autogen_core').setLevel(logging.WARNING)
+logging.getLogger('telethon').setLevel(logging.WARNING)
+logging.getLogger('hpack').setLevel(logging.WARNING)  # HTTP/2 header compression spam
+logging.getLogger('hpack.hpack').setLevel(logging.WARNING)  # More specific hpack logs
+logging.getLogger('asyncio').setLevel(logging.WARNING)  # Asyncio selector logs
+
+# Keep our app code verbose
+logging.getLogger('app').setLevel(logging.DEBUG)
 logger = logging.getLogger(__name__) # Use __name__ for specific logger
 
 # Configuration
@@ -85,7 +104,7 @@ async def test_api_translations(test_args):
     assert client, "Anthropic client could not be initialized. Check ANTHROPIC_API_KEY."
     logger.info("Testing modern Lurkmore style translation for Israeli Russian audience...")
     # Use new semantic linking approach with empty memory for this test
-    translation_result, conversation_log = await translate_and_link(client, TEST_MESSAGE, [])
+    translation_result, conversation_log = await translate_and_link(TEST_MESSAGE, [])
     assert translation_result and len(translation_result) > 10, "Modern Lurkmore style translation failed or returned empty/short result"
     assert conversation_log and len(conversation_log) > 0, "Editorial conversation log should not be empty"
     logger.info(f"Modern Lurkmore style translation successful: {translation_result[:100]}...")

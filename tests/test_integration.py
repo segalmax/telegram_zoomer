@@ -3,15 +3,26 @@
 Test integration between article extraction and translation
 """
 
+# Load environment variables FIRST before any imports that need them
+from pathlib import Path
+from dotenv import load_dotenv
+
+project_root = Path(__file__).resolve().parent.parent
+load_dotenv(dotenv_path=project_root / 'app_settings.env', override=True)
+load_dotenv(dotenv_path=project_root / '.env', override=False)
+
+# Now safe to import modules that need environment variables
 import sys
 import os
 import asyncio
+
+from app.autogen_translation import get_anthropic_client
 
 # Add project root directory to path so we can import the app package
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from app.article_extractor import extract_article
-from app.translator import get_anthropic_client, translate_and_link
+from app.autogen_translation import translate_and_link
 
 import pytest
 
@@ -82,7 +93,7 @@ async def test_article_extraction_integration():
         
         client = get_anthropic_client(api_key)
         # Test with memories that should trigger semantic links
-        translated, conversation_log = await translate_and_link(client, translation_context, test_memories)
+        translated, conversation_log = await translate_and_link(translation_context, test_memories)
         
         print(f"\n=== Translation with Linking Result ===")
         print(f"Translated text length: {len(translated)} characters")

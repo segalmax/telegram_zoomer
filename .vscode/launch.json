@@ -10,7 +10,8 @@
             "args": [
                 "tests/test_e2e_unified.py",
                 "-s",
-                "--log-cli-level=WARNING",
+                "--log-cli-level=DEBUG",
+                "--log-cli-format=%(name)s - %(levelname)s - %(message)s",
                 "-v"
             ],
             "console": "integratedTerminal",

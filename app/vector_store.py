@@ -127,16 +127,16 @@ def save_pair(
         logger.error(f"💥 vector_store.save_pair failed for {pair_id}: {e}", exc_info=True)
 
 
-def recall(src: str, k: int = 10, channel_name: str | None = None) -> List[Dict[str, Any]]:
+def recall(source_message_text: str, k: int = 10, channel_name: str | None = None) -> List[Dict[str, Any]]:
     """Return ≤k most relevant past pairs. Optionally restrict to a specific channel name."""
-    assert src, "Source text is required for recall"
+    assert source_message_text, "Source text is required for recall"
     
-    logger.debug(f"🧠 Starting recall: k={k}, src_len={len(src)}")
+    logger.debug(f"🧠 Starting recall: k={k}, {len(source_message_text)=}")
     
     try:
         # Generate embedding for query
         embed_start = time.time()
-        vec = _embed(src)
+        vec = _embed(source_message_text)
         embed_time = time.time() - embed_start
         logger.debug(f"🔢 Generated query embedding in {embed_time:.3f}s: {len(vec)} dimensions")
         

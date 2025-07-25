@@ -5,21 +5,22 @@ Fail-fast, no fallbacks, uses Supabase-driven config, keeps translation-memory c
 from __future__ import annotations
 
 import os
-import asyncio
 from typing import Any, Dict, List, Tuple
 
+import anthropic
 from autogen_agentchat.agents import AssistantAgent
 from autogen_agentchat.teams import RoundRobinGroupChat
 from autogen_agentchat.conditions import MaxMessageTermination, TextMentionTermination
-from autogen_agentchat.ui import Console
 from autogen_ext.models.anthropic import AnthropicChatCompletionClient
 
 from app.config_loader import get_config_loader
-from app.vector_store import recall as recall_tm
 
-# ---------------------------------------------------------------------------
-# Helper utilities (memory prompt construction – copied from legacy translator)
-# ---------------------------------------------------------------------------
+config = get_config_loader()
+
+
+def get_anthropic_client(api_key: str):  # noqa: D401
+    """Legacy helper retained for bot import compatibility."""
+    return anthropic.Anthropic(api_key=api_key)
 
 def _memory_block(mem: List[Dict[str, Any]], k: int | None = None) -> str:
     """Return full source articles for contextual linking decisions."""
@@ -182,8 +183,8 @@ class AutoGenTranslationSystem:
 # Public API used by bot/tests – mirrors legacy signature
 # ---------------------------------------------------------------------------
 
-async def translate_and_link(_unused_client, src_text: str, mem: List[Dict[str, Any]], flow_collector=None):
-    """Async wrapper matching old signature -> returns translation, conversation_log."""
+async def translate_and_link(src_text: str, mem: List[Dict[str, Any]], flow_collector=None):
+    """Async wrapper -> returns translation, conversation_log."""
     system = AutoGenTranslationSystem()
     translation, conversation_log = await system.run(src_text, mem, flow_collector)
 
@@ -192,7 +193,3 @@ async def translate_and_link(_unused_client, src_text: str, mem: List[Dict[str, 
     store_tm(src_text, translation, conversation_log=conversation_log)
 
     return translation, conversation_log
-
-# Streaming variant currently unused in tests – raise to keep fail-fast behaviour.
-async def translate_and_link_streaming(*args, **kwargs):  # noqa: ANN001
-    raise RuntimeError("Streaming translation not implemented for AutoGen pipeline – use translate_and_link") 

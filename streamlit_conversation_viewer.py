@@ -15,7 +15,7 @@ assert os.getenv("ANTHROPIC_API_KEY"), "ANTHROPIC_API_KEY environment variable i
 assert os.getenv("SUPABASE_URL"), "SUPABASE_URL environment variable is required"
 assert os.getenv("SUPABASE_KEY"), "SUPABASE_KEY environment variable is required"
 
-from app.translator import get_anthropic_client
+from app.autogen_translation import get_anthropic_client
 from app.config_loader import get_config_loader
 from app.vector_store import recall as recall_tm, save_pair as store_tm  # Import production memory functions
 
@@ -1365,7 +1365,7 @@ def run_production_flow_translation(source_text, use_memory, settings_source="pr
     # Import production components
     try:
         from app.bot import FlowCollector, translate_and_post
-        from app.translator import get_anthropic_client
+        from app.autogen_translation import get_anthropic_client
     except ImportError as e:
         st.error(f"❌ Failed to import production components: {e}")
         st.error("Make sure you're running from the correct directory and all dependencies are installed.")
