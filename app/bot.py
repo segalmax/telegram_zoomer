@@ -24,7 +24,7 @@ from telethon.errors import SessionPasswordNeededError
 from datetime import datetime, timedelta
 import argparse
 
-from .vector_store import recall as recall_tm, save_pair as store_tm
+from .vector_store import recall as recall_tm, save_pair
 from .article_extractor import extract_article
 
 # Using translate_and_link for unified semantic linking
@@ -254,20 +254,20 @@ def determine_destination_channel_and_links(destination_channel, message_id):
 def query_translation_memory(source_message_text, message_id, flow_collector):
     """Query translation memory and return memory data."""
     memory_start_time = time.time()
-    memory = None
+    memories = None
     
     try:
         logger.info(f"🧠 Querying translation memory for message {message_id} (k=10)")
         logger.debug(f"🔍 Query text preview: {source_message_text[:100]}...")
         
-        memory = recall_tm(source_message_text, k=10, channel_name="nytzoomeru")
+        memories = recall_tm(source_message_text, k=10, channel_name="nytzoomeru")
         memory_query_time = time.time() - memory_start_time
         
         if flow_collector:
-            flow_collector.log_memory_query(source_message_text, memory, memory_query_time)
+            flow_collector.log_memory_query(source_message_text, memories, memory_query_time)
         
-        if memory:
-            log_memory_analysis(memory, memory_query_time)
+        if memories:
+            log_memory_analysis(memories, memory_query_time)
         else:
             logger.warning(f"❌ No memories found for message {message_id} in {memory_query_time:.3f}s")
             
@@ -277,13 +277,13 @@ def query_translation_memory(source_message_text, message_id, flow_collector):
         if flow_collector:
             flow_collector.log_memory_query(source_message_text, None, memory_query_time)
     
-    return memory
+    return memories
 
-def log_memory_analysis(memory, memory_query_time):
+def log_memory_analysis(memories, memory_query_time):
     """Log detailed analysis of retrieved memories."""
-    logger.info(f"✅ Found {len(memory)} relevant memories in {memory_query_time:.3f}s")
+    logger.info(f"✅ Found {len(memories)} relevant memories in {memory_query_time:.3f}s")
     
-    for i, m in enumerate(memory, 1):
+    for i, m in enumerate(memories, 1):
         similarity = m.get('similarity', 0.0)
         source_preview = m.get('source_text', '')[:60] + "..." if len(m.get('source_text', '')) > 60 else m.get('source_text', '')
         translation_preview = m.get('translation_text', '')[:60] + "..." if len(m.get('translation_text', '')) > 60 else m.get('translation_text', '')
@@ -291,7 +291,7 @@ def log_memory_analysis(memory, memory_query_time):
         logger.debug(f"    Source: {source_preview}")
         logger.debug(f"    Translation: {translation_preview}")
     
-    similarities = [m.get('similarity', 0.0) for m in memory]
+    similarities = [m.get('similarity', 0.0) for m in memories]
     avg_similarity = sum(similarities) / len(similarities) if similarities else 0
     max_similarity = max(similarities) if similarities else 0
     min_similarity = min(similarities) if similarities else 0
@@ -318,25 +318,25 @@ def append_article_content_if_needed(source_message_text, message_entity_urls, f
     
     return enriched_input
 
-async def perform_translation(enriched_input, memory, flow_collector):
+async def perform_translation(enriched_input, memories, flow_collector):
     """Perform the actual translation using AutoGen system."""
     logger.info("Translating in modern Lurkmore style for Israeli Russian audience with editorial system...")
     translation_start = time.time()
     
     if flow_collector:
-        memory_count = len(memory) if memory else 0
+        memory_count = len(memories) if memories else 0
         flow_collector.log_autogen_start(enriched_input, memory_count)
     
-    translated_text, conversation_log = await translate_and_link(enriched_input, memory, flow_collector)
+    final_translation_text, conversation_log = await translate_and_link(enriched_input, memories, flow_collector)
     translation_time_ms = int((time.time() - translation_start) * 1000)
     
     if flow_collector:
         translation_time_seconds = translation_time_ms / 1000
-        flow_collector.log_autogen_result(translated_text, conversation_log, translation_time_seconds)
+        flow_collector.log_autogen_result(final_translation_text, conversation_log, translation_time_seconds)
     
-    return translated_text, conversation_log
+    return final_translation_text, conversation_log
 
-def format_final_content(translated_text, source_footer, message_entity_urls):
+def format_final_content(final_translation_text, source_footer, message_entity_urls):
     """Format the final content with invisible links and footers."""
     logger.info("Safety check disabled - posting Lurkmore-style translation with navigation links")
     
@@ -345,7 +345,7 @@ def format_final_content(translated_text, source_footer, message_entity_urls):
         invisible_article_link = f"[\u200B]({message_entity_urls[0]})"
         logger.info(f"Added invisible article link for thumbnail: {message_entity_urls[0]}")
     
-    final_post_content = f"{invisible_article_link}{translated_text}{source_footer}"
+    final_post_content = f"{invisible_article_link}{final_translation_text}{source_footer}"
     logger.info(f"📝 Final post content preview: {final_post_content[:200]}...")
     
     return final_post_content
@@ -360,13 +360,13 @@ async def send_translated_message(client_instance, dst_channel_to_use, final_pos
     
     return sent_message
 
-def save_translation_to_memory(source_message_text, translated_text, conversation_log, message_id, sent_message, dst_channel_to_use):
+def save_translation_to_memory(source_message_text, final_translation_text, conversation_log, message_id, sent_message, dst_channel_to_use):
     """Save the translation pair to memory storage."""
     save_start_time = time.time()
     try:
         pair_id = f"{message_id}-right" if message_id else str(uuid.uuid4())
         logger.info(f"💾 Saving translation pair to memory: {pair_id}")
-        logger.debug(f"📝 Source length: {len(source_message_text)} chars, Translation length: {len(translated_text)} chars")
+        logger.debug(f"📝 Source length: {len(source_message_text)} chars, Translation length: {len(final_translation_text)} chars")
         
         destination_message_url = None
         if sent_message and hasattr(sent_message, 'id'):
@@ -374,9 +374,9 @@ def save_translation_to_memory(source_message_text, translated_text, conversatio
             destination_message_url = f"https://t.me/{dest_channel_clean}/{sent_message.id}"
             logger.info(f"🔗 Constructed destination URL: {destination_message_url}")
         
-        store_tm(
-            src=source_message_text,
-            tgt=translated_text,
+        save_pair(
+            source_message_text=source_message_text,
+            tgt=final_translation_text,
             pair_id=pair_id,
             message_id=sent_message.id if sent_message else message_id,
             channel_name=dst_channel_to_use.replace("@", ""),
@@ -397,17 +397,17 @@ async def translate_and_post(client_instance, source_message_text, message_id=No
         
         dst_channel_to_use, source_footer = determine_destination_channel_and_links(destination_channel, message_id)
         
-        memory = query_translation_memory(source_message_text, message_id, flow_collector)
+        memories = query_translation_memory(source_message_text, message_id, flow_collector)
         
         enriched_input = append_article_content_if_needed(source_message_text, message_entity_urls, flow_collector)
         
-        translated_text, conversation_log = await perform_translation(enriched_input, memory, flow_collector)
+        final_translation_text, conversation_log = await perform_translation(enriched_input, memories, flow_collector)
         
-        final_post_content = format_final_content(translated_text, source_footer, message_entity_urls)
+        final_post_content = format_final_content(final_translation_text, source_footer, message_entity_urls)
         
         sent_message = await send_translated_message(client_instance, dst_channel_to_use, final_post_content, flow_collector)
         
-        save_translation_to_memory(source_message_text, translated_text, conversation_log, message_id, sent_message, dst_channel_to_use)
+        save_translation_to_memory(source_message_text, final_translation_text, conversation_log, message_id, sent_message, dst_channel_to_use)
         
         logger.info(f"Total processing time for message: {time.time() - start_time:.2f} seconds")
         
@@ -416,6 +416,42 @@ async def translate_and_post(client_instance, source_message_text, message_id=No
     except Exception as e:
         logger.error(f"Error processing message: {str(e)}", exc_info=True)
         return False
+
+def extract_message_urls(message):
+    """Extract URLs from message entities."""
+    message_entity_urls = []
+    if hasattr(message, 'entities') and message.entities:
+        for entity in message.entities:
+            if hasattr(entity, 'url') and entity.url:
+                # Entity already has URL property
+                message_entity_urls.append(entity.url)
+                logger.info(f"Found URL entity with direct URL: {entity.url}")
+            elif hasattr(entity, '_') and entity._ == 'MessageEntityTextUrl':
+                # TextUrl entity type
+                if hasattr(entity, 'url'):
+                    message_entity_urls.append(entity.url)
+                    logger.info(f"Found TextUrl entity: {entity.url}")
+            elif hasattr(entity, '_') and entity._ in ('MessageEntityUrl', 'MessageEntityTextUrl'):
+                # Extract URL from the message text using offset and length
+                if hasattr(entity, 'offset') and hasattr(entity, 'length'):
+                    url_text = message.text[entity.offset:entity.offset + entity.length]
+                    if url_text.startswith('http'):
+                        message_entity_urls.append(url_text)
+                        logger.info(f"Extracted URL from text: {url_text}")
+                    else:
+                        logger.info(f"Found URL-like entity but not a valid URL: {url_text}")
+    return message_entity_urls
+
+async def process_message(client, message, destination_channel=None):
+    """Simple unified message processing."""
+    message_entity_urls = extract_message_urls(message)
+    logger.info(f"Extracted URLs from message: {message_entity_urls}")
+    await translate_and_post(        client, 
+        message.text, 
+        message.id, 
+        destination_channel=destination_channel,
+        message_entity_urls=message_entity_urls
+    )
 
 async def setup_event_handlers(client_instance):
     # Renamed client to client_instance
@@ -426,34 +462,8 @@ async def setup_event_handlers(client_instance):
             if not source_message_text: return
             logger.info(f"Processing new message ID {event.message.id}: {source_message_text[:50]}...")
             
-            # Extract URLs from message entities
-            message_entity_urls = []
-            if hasattr(event.message, 'entities') and event.message.entities:
-                for entity in event.message.entities:
-                    if hasattr(entity, 'url') and entity.url:
-                        # Entity already has URL property
-                        message_entity_urls.append(entity.url)
-                        logger.info(f"Found URL entity with direct URL: {entity.url}")
-                    elif hasattr(entity, '_') and entity._ == 'MessageEntityTextUrl':
-                        # TextUrl entity type
-                        if hasattr(entity, 'url'):
-                            message_entity_urls.append(entity.url)
-                            logger.info(f"Found TextUrl entity: {entity.url}")
-                    elif hasattr(entity, '_') and entity._ in ('MessageEntityUrl', 'MessageEntityTextUrl'):
-                        # Extract URL from the message text using offset and length
-                        if hasattr(entity, 'offset') and hasattr(entity, 'length'):
-                            url_text = source_message_text[entity.offset:entity.offset + entity.length]
-                            if url_text.startswith('http'):
-                                message_entity_urls.append(url_text)
-                                logger.info(f"Extracted URL from text: {url_text}")
-                            else:
-                                logger.info(f"Found URL-like entity but not a valid URL: {url_text}")
-            
-            logger.info(f"Extracted URLs from message: {message_entity_urls}")
-            
-            sent_message = await translate_and_post(client_instance, source_message_text, event.message.id, message_entity_urls=message_entity_urls)
-            if sent_message:
-                logger.info(f"Successfully processed and posted message ID {event.message.id}")
+            await process_message(client_instance, event.message)
+            logger.info(f"Successfully processed and posted message ID {event.message.id}")
         except Exception as e:
             logger.error(f"Error in handle_new_message: {str(e)}", exc_info=True)
 
@@ -489,42 +499,11 @@ async def process_recent_posts(client_instance, limit=None, timeout=None):
                 break
             logger.info(f"Processing message {msg.id}: {msg.text[:50]}...")
             
-            # Extract URLs from message entities
-            message_entity_urls = []
-            if hasattr(msg, 'entities') and msg.entities:
-                for entity in msg.entities:
-                    if hasattr(entity, 'url') and entity.url:
-                        # Entity already has URL property
-                        message_entity_urls.append(entity.url)
-                        logger.info(f"Found URL entity with direct URL: {entity.url}")
-                    elif hasattr(entity, '_') and entity._ == 'MessageEntityTextUrl':
-                        # TextUrl entity type
-                        if hasattr(entity, 'url'):
-                            message_entity_urls.append(entity.url)
-                            logger.info(f"Found TextUrl entity: {entity.url}")
-                    elif hasattr(entity, '_') and entity._ in ('MessageEntityUrl', 'MessageEntityTextUrl'):
-                        # Extract URL from the message text using offset and length
-                        if hasattr(entity, 'offset') and hasattr(entity, 'length'):
-                            url_text = msg.text[entity.offset:entity.offset + entity.length]
-                            if url_text.startswith('http'):
-                                message_entity_urls.append(url_text)
-                            else:
-                                logger.info(f"Found URL-like entity but not a valid URL: {url_text}")
-            
-            logger.info(f"Extracted URLs from message: {message_entity_urls}")
-            
-            processing_msg_timeout = min(processing_limits['processing_timeout_seconds'], (timeout - (time.time() - start_time)) / (len(messages) - processed_count + 1))
             try:
-                sent_message = await asyncio.wait_for(
-                    translate_and_post(client_instance, msg.text, msg.id, message_entity_urls=message_entity_urls),
-                    timeout=processing_msg_timeout
-                )
-                if sent_message: processed_count += 1
-            except asyncio.TimeoutError:
-                logger.error(f"Timed out processing message {msg.id}")
+                await process_message(client_instance, msg)
+                processed_count += 1
             except Exception as e:
                 logger.error(f"Error processing message {msg.id}: {str(e)}", exc_info=True)
-            await asyncio.sleep(processing_limits['rate_limit_sleep_seconds']) # Rate limit
         logger.info(f"Batch processing completed. Processed {processed_count}/{len(messages)} messages")
         return processed_count
     except Exception as e:
@@ -546,24 +525,8 @@ async def process_recent_messages(client, count):
             if not msg.text:
                 continue
             
-            # Extract URLs from message entities
-            message_entity_urls = []
-            if hasattr(msg, 'entities') and msg.entities:
-                for entity in msg.entities:
-                    if hasattr(entity, 'url') and entity.url:
-                        message_entity_urls.append(entity.url)
-                    elif hasattr(entity, '_') and entity._ in ('MessageEntityUrl', 'MessageEntityTextUrl'):
-                        if hasattr(entity, 'offset') and hasattr(entity, 'length'):
-                            url_text = msg.text[entity.offset:entity.offset + entity.length]
-                            if url_text.startswith('http'):
-                                message_entity_urls.append(url_text)
-            
             logger.info(f"Processing message ID: {msg.id}")
-            sent_message = await translate_and_post(client, msg.text, msg.id, message_entity_urls=message_entity_urls)
-            
-            # Add a short delay between processing messages
-            processing_limits = config.get_processing_limits()
-            await asyncio.sleep(processing_limits['rate_limit_sleep_seconds'])
+            await process_message(client, msg)
             
         logger.info(f"Completed processing {count} recent messages")
         return True
@@ -633,19 +596,7 @@ async def main():
                 
                 logger.info(f"Found message: {msg.text[:100]}...")
                 
-                # Extract URLs from message entities
-                message_entity_urls = []
-                if hasattr(msg, 'entities') and msg.entities:
-                    for entity in msg.entities:
-                        if hasattr(entity, 'url') and entity.url:
-                            message_entity_urls.append(entity.url)
-                        elif hasattr(entity, '_') and entity._ in ('MessageEntityUrl', 'MessageEntityTextUrl'):
-                            if hasattr(entity, 'offset') and hasattr(entity, 'length'):
-                                url_text = msg.text[entity.offset:entity.offset + entity.length]
-                                if url_text.startswith('http'):
-                                    message_entity_urls.append(url_text)
-                
-                sent_message = await translate_and_post(client, msg.text, msg.id, message_entity_urls=message_entity_urls)
+                await process_message(client, msg)
                 logger.info(f"Successfully translated message ID {args.translate_message}")
                 
             except Exception as e:
@@ -663,24 +614,10 @@ async def main():
             # Process each message
             for msg in reversed(messages):
                 logger.info(f"Processing message ID: {msg.id}")
-                if not msg.text: continue
+                if not msg.text: 
+                    continue
                 
-                # Extract URLs from message entities
-                message_entity_urls = []
-                if hasattr(msg, 'entities') and msg.entities:
-                    for entity in msg.entities:
-                        if hasattr(entity, 'url') and entity.url:
-                            message_entity_urls.append(entity.url)
-                        elif hasattr(entity, '_') and entity._ in ('MessageEntityUrl', 'MessageEntityTextUrl'):
-                            if hasattr(entity, 'offset') and hasattr(entity, 'length'):
-                                url_text = msg.text[entity.offset:entity.offset + entity.length]
-                                if url_text.startswith('http'):
-                                    message_entity_urls.append(url_text)
-                
-                sent_message = await translate_and_post(client, msg.text, msg.id, message_entity_urls=message_entity_urls)
-                # Add delay between processing
-                processing_limits = config.get_processing_limits()
-                await asyncio.sleep(processing_limits['rate_limit_sleep_seconds'])
+                await process_message(client, msg)
             
             logger.info("Finished processing recent messages")
             logger.info("🏁 Exiting after processing recent messages (not starting polling mode)")

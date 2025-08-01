@@ -12,7 +12,7 @@ import time
 import uuid
 from typing import List, Dict, Any
 
-from supabase import create_client, Client  # type: ignore
+from supabase import create_client  # type: ignore
 import openai  # type: ignore
 
 logger = logging.getLogger(__name__)
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 OPENAI_KEY = os.getenv("OPENAI_API_KEY")
-assert OPENAI_KEY, "OPENAI_API_KEY environment variable is required"
+assert OPENAI_KEY, "OPENAI_API_KEY environment variable is required, have you loaded .env file with dotenv?"
 _openai_client = openai.OpenAI(api_key=OPENAI_KEY)
 
 EMBED_MODEL = os.getenv("EMBED_MODEL", "text-embedding-ada-002")
@@ -34,25 +34,9 @@ EMBED_MODEL = os.getenv("EMBED_MODEL", "text-embedding-ada-002")
 assert SUPABASE_URL, "SUPABASE_URL environment variable is required"
 assert SUPABASE_KEY, "SUPABASE_KEY environment variable is required"
 
-try:
-    # Try creating client without any extra options first
-    _sb = create_client(SUPABASE_URL, SUPABASE_KEY)
-    logger.info("Supabase vector store enabled")
-except TypeError as e:
-    # Handle proxy parameter issue in older versions
-    try:
-        import inspect
-        sig = inspect.signature(create_client)
-        if 'options' in sig.parameters:
-            _sb = create_client(SUPABASE_URL, SUPABASE_KEY, options={})
-        else:
-            _sb = create_client(SUPABASE_URL, SUPABASE_KEY)
-        logger.info("Supabase vector store enabled (fallback)")
-    except Exception as e2:
-        raise RuntimeError(f"Failed to create Supabase client even with fallback: {e2}") from e2
-except Exception as e:
-    raise RuntimeError(f"Failed to create Supabase client: {e}") from e
-
+# Try creating client without any extra options first
+_sb = create_client(SUPABASE_URL, SUPABASE_KEY)
+logger.info("Supabase vector store enabled")
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -73,59 +57,54 @@ def _embed(text: str) -> List[float]:
 # Public API
 # ---------------------------------------------------------------------------
 
-def save_pair(
-    src: str, 
-    tgt: str, 
-    pair_id: str | None = None,
-    message_id: int | None = None,
-    channel_name: str | None = None,
-    message_url: str | None = None,
-    conversation_log: str | None = None
-) -> None:
+def save_pair(  source_message_text: str, 
+                tgt: str, 
+                pair_id: str | None = None,
+                message_id: int | None = None,
+                channel_name: str | None = None,
+                message_url: str | None = None,
+                conversation_log: str | None = None,
+        ) -> None:
     """Upsert one (source, translation) pair into Supabase. Fails if store unavailable or invalid input."""
-    assert src, "Source text is required for save_pair"
+    assert source_message_text, "Source text is required for save_pair"
     assert tgt, "Target text is required for save_pair"
     
     pair_id = pair_id or str(uuid.uuid4())
-    logger.debug(f"💾 Starting save_pair: id={pair_id}, src_len={len(src)}, tgt_len={len(tgt)}, message_id={message_id}, url={message_url}")
+    logger.debug(f"💾 Starting save_pair: id={pair_id}, src_len={len(source_message_text)}, tgt_len={len(tgt)}, message_id={message_id}, url={message_url}")
     
-    try:
-        # Generate embedding
-        embed_start = time.time()
-        vec = _embed(src)
-        embed_time = time.time() - embed_start
-        logger.debug(f"🔢 Generated embedding in {embed_time:.3f}s: {len(vec)} dimensions")
+    # Generate embedding
+    embed_start = time.time()
+    vec = _embed(source_message_text)
+    embed_time = time.time() - embed_start
+    logger.debug(f"🔢 Generated embedding in {embed_time:.3f}s: {len(vec)} dimensions")
+    
+    # Prepare data
+    data = {
+        "id": pair_id,
+        "source_text": source_message_text,
+        "translation_text": tgt,
+        "embedding": vec,
+        "created_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+    }
+    
+    # Add optional message metadata
+    if message_id is not None:
+        data["message_id"] = message_id
+    if channel_name is not None:
+        data["channel_name"] = channel_name
+    if message_url is not None:
+        data["message_url"] = message_url
+    if conversation_log is not None:
+        data["conversation_log"] = conversation_log
+    
+    # Save to database
+    db_start = time.time()
+    result = _sb.table("article_chunks").upsert(data).execute()  # type: ignore
+    db_time = time.time() - db_start
+    
+    logger.debug(f"💾 Database upsert completed in {db_time:.3f}s")
+    logger.info(f"💾 Successfully saved pair {pair_id}: embed={embed_time:.3f}s, db={db_time:.3f}s, url={message_url}")
         
-        # Prepare data
-        data = {
-            "id": pair_id,
-            "source_text": src,
-            "translation_text": tgt,
-            "embedding": vec,
-            "created_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
-        }
-        
-        # Add optional message metadata
-        if message_id is not None:
-            data["message_id"] = message_id
-        if channel_name is not None:
-            data["channel_name"] = channel_name
-        if message_url is not None:
-            data["message_url"] = message_url
-        if conversation_log is not None:
-            data["conversation_log"] = conversation_log
-        
-        # Save to database
-        db_start = time.time()
-        result = _sb.table("article_chunks").upsert(data).execute()  # type: ignore
-        db_time = time.time() - db_start
-        
-        logger.debug(f"💾 Database upsert completed in {db_time:.3f}s")
-        logger.info(f"💾 Successfully saved pair {pair_id}: embed={embed_time:.3f}s, db={db_time:.3f}s, url={message_url}")
-        
-    except Exception as e:
-        logger.error(f"💥 vector_store.save_pair failed for {pair_id}: {e}", exc_info=True)
-
 
 def recall(source_message_text: str, k: int = 10, channel_name: str | None = None) -> List[Dict[str, Any]]:
     """Return ≤k most relevant past pairs. Optionally restrict to a specific channel name."""

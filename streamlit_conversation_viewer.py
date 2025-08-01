@@ -71,7 +71,7 @@ def save_conversation_to_db(source_text: str, translated_text: str, conversation
     
     return result.data[0] if result.data else None
 
-async def custom_autogen_event_stream(article: str, ui_config: dict, memory: list = None):
+async def custom_autogen_event_stream(enriched_input: str, ui_config: dict, memories: list = None):
     """REAL streaming directly from Claude API - bypassing AutoGen's fake streaming"""
     import anthropic
     import asyncio
@@ -99,17 +99,17 @@ async def custom_autogen_event_stream(article: str, ui_config: dict, memory: lis
     # Translator phase - REAL streaming from Claude with memory context
     yield type('AgentStart', (), {
         'source': 'Translator',
-        'event_type': 'agent_start'
-    })()
-    
-    translator_response = ""
+    'event_type': 'agent_start'
+})()
+
+translator_response = ""
     token_count = 0
     
     # Construct translator message with memory context (same as production bot)
-    translator_message = f"{translator_prompt}\n\n{article}"
-    if memory:
+    translator_message = f"{translator_prompt}\n\n{enriched_input}"
+    if memories:
         # Add memory context (simplified - production bot uses more complex memory injection)
-        translator_message += f"\n\n[Translation Memory Context: {len(memory)} past translations available]"
+        translator_message += f"\n\n[Translation Memory Context: {len(memories)} past translations available]"
     
     async with anthropic_client.messages.stream(
         model=ai_config.get('model_id', 'claude-3-5-sonnet-20241022'),
@@ -154,7 +154,7 @@ async def custom_autogen_event_stream(article: str, ui_config: dict, memory: lis
         temperature=ai_config.get('temperature', 0.7),
         messages=[{
             "role": "user",
-            "content": f"{editor_prompt}\n\nOriginal: {article}\n\nTranslation to review: {translator_response}"
+            "content": f"{editor_prompt}\n\nOriginal: {enriched_input}\n\nTranslation to review: {translator_response}"
         }]
     ) as stream:
         async for text in stream.text_stream:
@@ -185,9 +185,9 @@ async def custom_autogen_event_stream(article: str, ui_config: dict, memory: lis
     token_count = 0
     
     # Final translator message with memory context if available
-    final_translator_message = f"{translator_prompt}\n\nOriginal: {article}\n\nMy first translation: {translator_response}\n\nEditor feedback: {editor_response}\n\nPlease provide the final improved translation incorporating the editor's feedback:"
-    if memory:
-        final_translator_message += f"\n\n[Translation Memory: Use {len(memory)} past translations to avoid repetition and ensure fresh language]"
+    final_translator_message = f"{translator_prompt}\n\nOriginal: {enriched_input}\n\nMy first translation: {translator_response}\n\nEditor feedback: {editor_response}\n\nPlease provide the final improved translation incorporating the editor's feedback:"
+    if memories:
+        final_translator_message += f"\n\n[Translation Memory: Use {len(memories)} past translations to avoid repetition and ensure fresh language]"
     
     async with anthropic_client.messages.stream(
         model=ai_config.get('model_id', 'claude-3-5-sonnet-20241022'),
@@ -321,16 +321,16 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-def show_memory_entries(memory):
+def show_memory_entries(memories):
     """Display translation memory entries in a nice format"""
-    if not memory:
+    if not memories:
         st.info("💭 No relevant translation memory found")
         return
-        
-    st.markdown("### 📚 Translation Memory Context")
-    st.markdown(f"Found **{len(memory)}** similar past translations:")
     
-    for i, entry in enumerate(memory, 1):
+    st.markdown("### 📚 Translation Memory Context")
+    st.markdown(f"Found **{len(memories)}** similar past translations:")
+    
+    for i, entry in enumerate(memories, 1):
         with st.expander(f"Memory #{i}: {entry['translation_text'][:60]}..."):
             col1, col2 = st.columns([3, 1])
             with col1:
@@ -1198,7 +1198,7 @@ def run_live_translation_with_streaming(source_text, use_memory):
                             
                             # Store in production memory system (same as bot)
                             store_tm(
-                                src=source_text,
+                                source_message_text=source_text,
                                 tgt=final_result,
                                 pair_id=pair_id,
                                 message_id=None,  # Streamlit doesn't have message IDs
