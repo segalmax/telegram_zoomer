@@ -25,11 +25,15 @@ class DatabaseSession:
     def __init__(self, session_name, environment='production'):
         self.session_name = session_name
         self.environment = environment
-        self.supabase_url = os.environ.get('SUPABASE_URL')
-        self.supabase_key = os.environ.get('SUPABASE_KEY')
         
-        assert self.supabase_url, "SUPABASE_URL environment variable is required for session management"
-        assert self.supabase_key, "SUPABASE_KEY environment variable is required for session management"
+        # Use centralized config for Supabase credentials
+        from .config_loader import get_config_loader
+        _config = get_config_loader()
+        self.supabase_url = _config.supabase_url
+        self.supabase_key = _config.supabase_key
+        
+        assert self.supabase_url, "Supabase URL missing from config"
+        assert self.supabase_key, "Supabase key missing from config"
         self.use_database = True
     
     def save_session(self, session_string):

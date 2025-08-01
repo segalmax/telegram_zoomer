@@ -36,8 +36,19 @@ graph TD
             E2c["🧠 _memory_block() Format<br/>1. ИСТОЧНИК: {source_text} ⚠️ ORIGINAL message only<br/>   ПЕРЕВОД: {translation_text} ✅ Full posted translation<br/>   URL: {message_url} 🔗 Destination channel URL"]
         end
         
-        E3["👥 Agent Creation<br/>Translator: AssistantAgent(system_message=translator_prompt)<br/>Editor: AssistantAgent(system_message=editor_prompt)<br/>Model: AnthropicChatCompletionClient(claude-sonnet-4)"]
-        E4["💬 RoundRobinGroupChat Conversation<br/>Termination: TextMentionTermination('APPROVE') | MaxMessageTermination(4)<br/>Flow: User→Translator→Editor→Translator→Editor (until APPROVE)"]
+        subgraph "6b Agent Creation"
+            E3a["🔤 Translator Agent<br/>AssistantAgent(system_message=translator_prompt)<br/>Model: claude-sonnet-4<br/>Role: Initial translation + improvements"]
+            E3b["📝 Editor Agent<br/>AssistantAgent(system_message=editor_prompt)<br/>Model: claude-sonnet-4<br/>Role: Review + feedback + approval"]
+        end
+        
+        subgraph "6c Agent Conversation Flow"
+            E4a["1️⃣ User Task<br/>enriched_input → Translator"]
+            E4b["2️⃣ Translator Response<br/>Initial translation attempt"]
+            E4c["3️⃣ Editor Review<br/>Feedback or APPROVE"]
+            E4d["4️⃣ Translator Revision<br/>(if feedback received)"]
+            E4e["🔄 Continue until APPROVE<br/>or MaxMessageTermination(4)"]
+        end
+        
         E5["✅ Result Extraction<br/>If Editor says 'APPROVE': use previous Translator message<br/>Else: use last Translator message<br/>→ final_translation_text + conversation_log"]
     end
     
@@ -78,10 +89,15 @@ graph TD
     E1 -->|"6c\. prompts from config DB"| E2b
     C4 -->|"6d\. memories[] to format"| E2c
     E2c -->|"6e\. formatted memories block"| E2a
-    E2a -->|"6f\. translator_prompt"| E3
-    E2b -->|"6g\. editor_prompt"| E3
-    E3 -->|"6h\. translator + editor agents"| E4
-    E4 -->|"6i\. conversation messages"| E5
+    E2a -->|"6f\. translator_prompt"| E3a
+    E2b -->|"6g\. editor_prompt"| E3b
+    E3a -->|"6h\. translator agent ready"| E4a
+    E3b -->|"6h\. editor agent ready"| E4a
+    E4a -->|"task input"| E4b
+    E4b -->|"translation output"| E4c
+    E4c -->|"feedback/approve"| E4d
+    E4d -->|"revision (if needed)"| E4c
+    E4e -->|"6i\. final conversation"| E5
     
     %% Final formatting
     E5 -->|"7a\. final_translation_text"| F1
@@ -104,8 +120,13 @@ graph TD
     style E2a fill:#f8e1ff
     style E2b fill:#e1f8ff
     style E2c fill:#fff1e1
-    style E3 fill:#ffe1f8
-    style E4 fill:#e1fff8
+    style E3a fill:#e1f5fe
+    style E3b fill:#fff9c4
+    style E4a fill:#f3e5f5
+    style E4b fill:#e1f5fe
+    style E4c fill:#fff9c4
+    style E4d fill:#e1f5fe
+    style E4e fill:#fce4ec
     style E5 fill:#f1f8e1
     style F1 fill:#e0f2f1
     style G1 fill:#fff8e1

@@ -12,8 +12,7 @@ load_dotenv()
 # FAIL IMMEDIATELY if required environment variables are missing - NO FALLBACKS!
 assert os.getenv("OPENAI_API_KEY"), "OPENAI_API_KEY environment variable is required"
 assert os.getenv("ANTHROPIC_API_KEY"), "ANTHROPIC_API_KEY environment variable is required"
-assert os.getenv("SUPABASE_URL"), "SUPABASE_URL environment variable is required"
-assert os.getenv("SUPABASE_KEY"), "SUPABASE_KEY environment variable is required"
+# Supabase credentials are now handled by centralized config
 
 from app.autogen_translation import get_anthropic_client
 from app.config_loader import get_config_loader
@@ -26,10 +25,8 @@ from supabase import create_client, Client
 # Initialize config loader
 config = get_config_loader()
 
-# Initialize Supabase client
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+# Initialize Supabase client using centralized config
+supabase: Client = create_client(config.supabase_url, config.supabase_key)
 
 def save_conversation_to_db(source_text: str, translated_text: str, conversation_log: list, 
                           settings: dict, streaming_type: str, model_used: str = None, 
@@ -1657,7 +1654,8 @@ def show_live_translation():
 def load_conversations_from_db():
     """Load conversations from Supabase database"""
     try:
-        supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
+        config_local = get_config_loader()
+        supabase = create_client(config_local.supabase_url, config_local.supabase_key)
         response = supabase.table("streamlit_conversations").select("*").order("created_at", desc=True).execute()
         return response.data
     except Exception as e:

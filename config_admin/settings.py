@@ -83,11 +83,11 @@ WSGI_APPLICATION = 'config_admin.wsgi.application'
 # Supabase PostgreSQL - fail immediately if not configured properly
 SUPABASE_URL = os.getenv('SUPABASE_URL')
 SUPABASE_KEY = os.getenv('SUPABASE_KEY')
-DB_PASSWORD = os.getenv('SUPABASE_DB_PASSWORD') or os.getenv('DB_PASSWORD')
+SUPABASE_DB_PASSWORD = os.getenv('SUPABASE_DB_PASSWORD')
 
 assert SUPABASE_URL, "SUPABASE_URL environment variable is required"
 assert SUPABASE_KEY, "SUPABASE_KEY environment variable is required"
-assert DB_PASSWORD, "DB_PASSWORD environment variable is required"
+assert SUPABASE_DB_PASSWORD, "SUPABASE_DB_PASSWORD environment variable is required"
 
 import urllib.parse
 parsed = urllib.parse.urlparse(SUPABASE_URL)
@@ -98,7 +98,7 @@ DATABASES = {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': 'postgres',
         'USER': 'postgres',
-        'PASSWORD': DB_PASSWORD,
+        'PASSWORD': SUPABASE_DB_PASSWORD,
         'HOST': f'db.{project_id}.supabase.co',
         'PORT': '5432',
         'OPTIONS': {

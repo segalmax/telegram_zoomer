@@ -25,12 +25,18 @@ class ConfigLoader:
         self._cache: Dict[str, Any] = {}
         self._environment = os.getenv('ENVIRONMENT', 'dev')
         
-        # Supabase connection details
-        self.supabase_url = os.getenv('SUPABASE_URL')
-        self.supabase_key = os.getenv('SUPABASE_KEY')
+        # Supabase connection details - support local/prod switching
+        supabase_env = os.getenv('SUPABASE_ENV', 'prod')
         
-        assert self.supabase_url, "SUPABASE_URL environment variable is required"
-        assert self.supabase_key, "SUPABASE_KEY environment variable is required"
+        if supabase_env == 'local':
+            self.supabase_url = 'http://127.0.0.1:54321'
+            self.supabase_key = os.getenv('SUPABASE_LOCAL_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0')
+        else:
+            self.supabase_url = os.getenv('SUPABASE_URL')
+            self.supabase_key = os.getenv('SUPABASE_KEY')
+        
+        assert self.supabase_url, f"Supabase URL missing for environment: {supabase_env}"
+        assert self.supabase_key, f"Supabase key missing for environment: {supabase_env}"
         
         self.headers = {
             'apikey': self.supabase_key,

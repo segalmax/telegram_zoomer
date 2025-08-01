@@ -20,8 +20,8 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Environment
 # ---------------------------------------------------------------------------
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+from .config_loader import get_config_loader
+
 OPENAI_KEY = os.getenv("OPENAI_API_KEY")
 assert OPENAI_KEY, "OPENAI_API_KEY environment variable is required, have you loaded .env file with dotenv?"
 _openai_client = openai.OpenAI(api_key=OPENAI_KEY)
@@ -29,10 +29,11 @@ _openai_client = openai.OpenAI(api_key=OPENAI_KEY)
 EMBED_MODEL = os.getenv("EMBED_MODEL", "text-embedding-ada-002")
 
 # ---------------------------------------------------------------------------
-# Supabase client (REQUIRED)
+# Supabase client (REQUIRED) - uses centralized config
 # ---------------------------------------------------------------------------
-assert SUPABASE_URL, "SUPABASE_URL environment variable is required"
-assert SUPABASE_KEY, "SUPABASE_KEY environment variable is required"
+_config = get_config_loader()
+SUPABASE_URL = _config.supabase_url
+SUPABASE_KEY = _config.supabase_key
 
 # Try creating client without any extra options first
 _sb = create_client(SUPABASE_URL, SUPABASE_KEY)
