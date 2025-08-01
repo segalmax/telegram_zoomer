@@ -67,7 +67,8 @@ class AutoGenTranslationSystem:
                 model=model_id,
                 api_key=os.getenv('ANTHROPIC_API_KEY'),
                 extra_create_args={
-                    "thinking": {"budget_tokens": 10_000}
+                    "thinking": {"budget_tokens": 10_000},
+                    "timeout": 120.0  # 2 minute timeout
                 },
             )
         else:#not implemented
@@ -121,20 +122,30 @@ class AutoGenTranslationSystem:
         messages: List[Any] = []
         conversation_messages = []  # For flow collector
         
-        async for event in team.run_stream(task=enriched_input):
-            # Collect only TextMessage events (skip TaskResult etc.)
-            if getattr(event, 'content', None):
-                messages.append(event)
-                
-                # Log each message to flow collector
-                if flow_collector:
-                    source = getattr(event, 'source', 'unknown')
-                    text = str(event.content)
-                    conversation_messages.append({
-                        'source': source,
-                        'content': text,
-                        'timestamp': getattr(event, 'timestamp', None)
-                    })
+        # Log AI translation start for debugging
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"🤖 Starting AI translation conversation (max 4 messages, 2min timeout)")
+        
+        try:
+            async for event in team.run_stream(task=enriched_input):
+                # Collect only TextMessage events (skip TaskResult etc.)
+                if getattr(event, 'content', None):
+                    messages.append(event)
+                    
+                    # Log each message to flow collector
+                    if flow_collector:
+                        source = getattr(event, 'source', 'unknown')
+                        text = str(event.content)
+                        conversation_messages.append({
+                            'source': source,
+                            'content': text,
+                            'timestamp': getattr(event, 'timestamp', None)
+                        })
+        except Exception as e:
+            logger.error(f"❌ AI translation failed: {type(e).__name__}: {e}")
+            # Return a fallback translation
+            return f"⚠️ Translation unavailable (API error: {type(e).__name__})", f"Error: {e}"
 
         # Update flow collector with conversation messages
         if flow_collector and flow_collector.autogen_conversation:
@@ -175,6 +186,9 @@ class AutoGenTranslationSystem:
                     break
 
         conversation_log = "\n\n".join(log_parts)
+        
+        # Log successful completion
+        logger.info(f"✅ AI translation completed: {len(final_translation_text)} chars, {len(messages)} messages")
 
         # Let AI handle all link placement - no automatic footer links
         return final_translation_text, conversation_log
