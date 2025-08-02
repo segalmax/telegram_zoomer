@@ -36,15 +36,19 @@ LOCAL_DB_CONTAINER=$(docker ps --filter "name=supabase_db_" --format "{{.Names}}
 
 echo "🔗 Linking CLI to prod project ($SUPABASE_PROJECT_REF) …"
 # ignore errors if already linked
-supabase link --project-ref "$SUPABASE_PROJECT_REF" 2>/dev/null || true
+npx supabase link --project-ref "$SUPABASE_PROJECT_REF" 2>/dev/null || true
 
 TMP_DUMP=tmp_prod_dump.sql
 
 echo "📥 Dumping prod schema + data …"
-supabase db dump --schema public -f "$TMP_DUMP" --stdout >/dev/null
+npx supabase db dump --schema public -f "$TMP_DUMP" >/dev/null
 
 echo "🗑️  Resetting local database …"
 docker exec "$LOCAL_DB_CONTAINER" psql -U postgres -d postgres -c "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;" >/dev/null
+
+# Ensure vector extension exists before restoring tables that depend on it
+echo "🔧 Enabling vector extension …"
+docker exec "$LOCAL_DB_CONTAINER" psql -U postgres -d postgres -c "CREATE EXTENSION IF NOT EXISTS vector;" >/dev/null
 
 echo "📦 Restoring into local …"
 docker exec -i "$LOCAL_DB_CONTAINER" psql -U postgres -d postgres < "$TMP_DUMP" >/dev/null
