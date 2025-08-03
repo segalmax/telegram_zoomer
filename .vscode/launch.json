@@ -17,8 +17,61 @@
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}",
             "env": {
-                "PYTHONPATH": "${workspaceFolder}"
+                "PYTHONPATH": "${workspaceFolder}",
+                "SUPABASE_ENV": "local"
             }
         },
+        {
+            "name": "Django Admin DEV",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/manage.py",
+            "args": ["runserver", "8000"],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}",
+                "SUPABASE_ENV": "local"
+            }
+        },
+        {
+            "name": "Django Admin PROD",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/manage.py",
+            "args": ["runserver", "8010"],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}",
+                "SUPABASE_ENV": "prod"
+            }
+        },
+        {
+            "name": "Streamlit DEV",
+            "type": "python",
+            "request": "launch",
+            "module": "streamlit",
+            "args": ["run", "streamlit_app.py", "--server.port", "8030", "--server.runOnSave", "true"],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}",
+                "SUPABASE_ENV": "local"
+            }
+        },
+        {
+            "name": "Streamlit PROD",
+            "type": "python",
+            "request": "launch",
+            "module": "streamlit",
+            "args": ["run", "streamlit_app.py", "--server.port", "8020", "--server.runOnSave", "true"],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}",
+                "SUPABASE_ENV": "prod"
+            }
+        }
     ]
 } 

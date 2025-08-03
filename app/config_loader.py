@@ -1,222 +1,143 @@
 """
-Simple configuration loader for telegram_zoomer bot.
-Reads configuration from Supabase REST API.
-FAILS LOUDLY when configuration is missing - no defensive coding!
+Minimal configuration loader for telegram_zoomer.
+Uses Django ORM for consistent database access and automatic audit logging.
+~40 LOC by design – no caching, no type-conversions, no defensive fallbacks.
 """
 
+from __future__ import annotations
+
 import os
-import httpx
 from typing import Any, Dict, Optional
-import json
+
+# Bootstrap Django ORM
+import django
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config_admin.settings")
+django.setup()
+
+from bot_config import models as m
 
 
 class ConfigurationError(Exception):
-    """Raised when configuration is missing or invalid"""
-    pass
+    """Raised when configuration is missing or invalid."""
 
 
 class ConfigLoader:
-    """
-    Primitive configuration loader using Supabase REST API.
-    NO defensive coding - fails loudly when config missing!
-    """
-    
-    def __init__(self):
-        self._cache: Dict[str, Any] = {}
-        self._environment = os.getenv('ENVIRONMENT', 'dev')
+    """Primitive one-shot configuration loader using Django ORM."""
+
+    def __init__(self) -> None:
+        from .database_config import get_database_config
         
-        # Supabase connection details - support local/prod switching
-        supabase_env = os.getenv('SUPABASE_ENV', 'prod')
+        config = get_database_config()
+        print(config["description"])
         
-        if supabase_env == 'local':
-            self.supabase_url = 'http://127.0.0.1:54321'
-            self.supabase_key = os.getenv('SUPABASE_LOCAL_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0')
-        else:
-            self.supabase_url = os.getenv('SUPABASE_URL')
-            self.supabase_key = os.getenv('SUPABASE_KEY')
-        
-        assert self.supabase_url, f"Supabase URL missing for environment: {supabase_env}"
-        assert self.supabase_key, f"Supabase key missing for environment: {supabase_env}"
-        
-        self.headers = {
-            'apikey': self.supabase_key,
-            'Authorization': f'Bearer {self.supabase_key}',
-            'Content-Type': 'application/json'
-        }
-    
-    def _rest_get(self, table: str, filters: Dict[str, str] = None) -> Dict[str, Any]:
-        """Make a REST API call to Supabase."""
-        url = f"{self.supabase_url}/rest/v1/{table}"
-        
-        params = {}
-        if filters:
-            for key, value in filters.items():
-                params[f"{key}"] = f"eq.{value}"
-        
-        response = httpx.get(url, headers=self.headers, params=params)
-        response.raise_for_status()
-        
-        data = response.json()
-        if not data:
-            raise ConfigurationError(f"No data found in {table} with filters {filters}")
-        
-        return data[0] if isinstance(data, list) else data
-    
+        # Expose for legacy code – remove when callers are updated
+        self.supabase_url: str = config["url"] 
+        self.supabase_key: str = config["api_key"]
+
+        self._env: str = os.getenv("ENVIRONMENT", "dev")
+
+    # ------------------------------------------------------------------
+    # Public, minimal API used elsewhere in the code-base (Django ORM)
+    # ------------------------------------------------------------------
     def get_setting(self, key: str) -> Any:
-        """Get a configuration setting by key. FAILS if missing."""
-        cache_key = f"setting_{key}"
-        
-        if cache_key not in self._cache:
-            try:
-                setting = self._rest_get("bot_config_configsetting", {"key": key})
-                value = setting['value']
-                
-                # Type conversion based on value_type
-                value_type = setting.get('value_type', 'str')
-                if value_type == 'int':
-                    value = int(value)
-                elif value_type == 'float':
-                    value = float(value)
-                elif value_type == 'bool':
-                    value = value.lower() in ('true', '1', 'yes', 'on')
-                elif value_type == 'json':
-                    value = json.loads(value)
-                
-                self._cache[cache_key] = value
-            except Exception as e:
-                raise ConfigurationError(f"Configuration setting '{key}' not found in database: {e}")
-        
-        return self._cache[cache_key]
-    
+        try:
+            obj = m.ConfigSetting.objects.get(key=key)
+            return obj.value
+        except m.ConfigSetting.DoesNotExist:
+            raise ConfigurationError(f"Setting '{key}' not found")
+
     def get_prompt(self, name: str) -> str:
-        """Get a translation prompt by name. FAILS if missing."""
-        cache_key = f"prompt_{name}"
-        
-        if cache_key not in self._cache:
-            try:
-                prompt = self._rest_get("bot_config_translationprompt", {"name": name, "is_active": "true"})
-                self._cache[cache_key] = prompt['content']
-            except Exception as e:
-                raise ConfigurationError(f"Translation prompt '{name}' not found in database: {e}")
-        
-        return self._cache[cache_key]
-    
+        try:
+            obj = m.TranslationPrompt.objects.get(name=name, is_active=True)
+            return obj.content
+        except m.TranslationPrompt.DoesNotExist:
+            raise ConfigurationError(f"Prompt '{name}' not found")
+
     def get_ai_model_config(self) -> Dict[str, Any]:
-        """Get the default AI model configuration. FAILS if missing."""
-        cache_key = "ai_model_default"
-        
-        if cache_key not in self._cache:
-            try:
-                model = self._rest_get("bot_config_aimodelconfig", {"is_default": "true"})
-                self._cache[cache_key] = {
-                    'model_id': model['model_id'],
-                    'max_tokens': model['max_tokens'],
-                    'temperature': model['temperature'],
-                    'thinking_budget_tokens': model['thinking_budget_tokens'],
-                    'timeout_seconds': model['timeout_seconds']
-                }
-            except Exception as e:
-                raise ConfigurationError(f"No default AI model configuration found in database: {e}")
-        
-        return self._cache[cache_key]
-    
+        obj = m.AIModelConfig.objects.filter(is_default=True).first()
+        if not obj:
+            raise ConfigurationError("Default AI model config not found")
+        return {
+            'id': obj.id,
+            'name': obj.name,
+            'provider': obj.provider,
+            'model_id': obj.model_id,
+            'max_tokens': obj.max_tokens,
+            'temperature': float(obj.temperature),
+            'thinking_budget_tokens': obj.thinking_budget_tokens,
+            'timeout_seconds': obj.timeout_seconds,
+            'is_default': obj.is_default,
+            'created_at': obj.created_at.isoformat(),
+            'updated_at': obj.updated_at.isoformat(),
+        }
+
     def get_processing_limits(self) -> Dict[str, Any]:
-        """Get processing limits for current environment. FAILS if missing."""
-        cache_key = f"processing_limits_{self._environment}"
-        
-        if cache_key not in self._cache:
-            try:
-                limits = self._rest_get("bot_config_processinglimits", {"environment": self._environment})
-                self._cache[cache_key] = {
-                    'batch_timeout_seconds': limits['batch_timeout_seconds'],
-                    'batch_message_limit': limits['batch_message_limit'],
-                    'fetch_timeout_seconds': limits['fetch_timeout_seconds'],
-                    'processing_timeout_seconds': limits['processing_timeout_seconds'],
-                    'rate_limit_sleep_seconds': limits['rate_limit_sleep_seconds'],
-                    'timeout_buffer_seconds': limits['timeout_buffer_seconds']
-                }
-            except Exception as e:
-                raise ConfigurationError(f"Processing limits for environment '{self._environment}' not found in database: {e}")
-        
-        return self._cache[cache_key]
-    
-    def get_translation_memory_config(self) -> Dict[str, Any]:
-        """Get translation memory configuration. FAILS if missing."""
-        cache_key = "translation_memory_config"
-        
-        if cache_key not in self._cache:
-            try:
-                config = self._rest_get("bot_config_translationmemoryconfig", {"is_active": "true"})
-                self._cache[cache_key] = {
-                    'default_recall_k': config['default_recall_k'],
-                    'overfetch_multiplier': config['overfetch_multiplier'],
-                    'recency_weight': config['recency_weight'],
-                    'embedding_model': config['embedding_model'],
-                    'embedding_timeout_seconds': config['embedding_timeout_seconds']
-                }
-            except Exception as e:
-                raise ConfigurationError(f"Active translation memory configuration not found in database: {e}")
-        
-        return self._cache[cache_key]
-    
+        obj = m.ProcessingLimits.objects.filter(environment=self._env).first()
+        if not obj:
+            raise ConfigurationError(f"Processing limits for '{self._env}' not found")
+        return {
+            'environment': obj.environment,
+            'batch_timeout_seconds': obj.batch_timeout_seconds,
+            'batch_message_limit': obj.batch_message_limit,
+            'fetch_timeout_seconds': obj.fetch_timeout_seconds,
+            'processing_timeout_seconds': obj.processing_timeout_seconds,
+            'rate_limit_sleep_seconds': float(obj.rate_limit_sleep_seconds),
+            'timeout_buffer_seconds': obj.timeout_buffer_seconds,
+        }
+
     def get_article_extraction_config(self, domain: str) -> Dict[str, Any]:
-        """Get article extraction config for domain. FAILS if missing."""
-        cache_key = f"article_extraction_{domain}"
-        
-        if cache_key not in self._cache:
-            try:
-                config = self._rest_get("bot_config_articleextractionconfig", {"domain": domain, "is_active": "true"})
-                self._cache[cache_key] = {
-                    'language_code': config['language_code'],
-                    'min_article_length': config['min_article_length'],
-                    'timeout_seconds': config['timeout_seconds']
-                }
-            except Exception as e:
-                raise ConfigurationError(f"Article extraction config for domain '{domain}' not found in database: {e}")
-        
-        return self._cache[cache_key]
-    
-    def get_message_template(self, name: str) -> str:
-        """Get a message template by name. FAILS if missing."""
-        cache_key = f"template_{name}"
-        
-        if cache_key not in self._cache:
-            try:
-                template = self._rest_get("bot_config_messagetemplate", {"name": name, "is_active": "true"})
-                self._cache[cache_key] = template['template']
-            except Exception as e:
-                raise ConfigurationError(f"Message template '{name}' not found in database: {e}")
-        
-        return self._cache[cache_key]
-    
+        try:
+            obj = m.ArticleExtractionConfig.objects.get(domain=domain)
+            return {
+                'domain': obj.domain,
+                'language_code': obj.language_code,
+                'min_article_length': obj.min_article_length,
+                'timeout_seconds': obj.timeout_seconds,
+            }
+        except m.ArticleExtractionConfig.DoesNotExist:
+            raise ConfigurationError(f"Article extraction config for '{domain}' not found")
+
+    def get_translation_memory_config(self) -> Dict[str, Any]:
+        obj = m.TranslationMemoryConfig.objects.filter(is_active=True).first()
+        if not obj:
+            raise ConfigurationError("Active translation memory config not found")
+        return {
+            'id': obj.id,
+            'name': obj.name,
+            'default_recall_k': obj.default_recall_k,
+            'overfetch_multiplier': obj.overfetch_multiplier,
+            'recency_weight': float(obj.recency_weight),
+            'embedding_model': obj.embedding_model,
+            'embedding_timeout_seconds': obj.embedding_timeout_seconds,
+            'is_active': obj.is_active,
+        }
+
     def get_environment_config(self) -> Dict[str, Any]:
-        """Get environment configuration. FAILS if missing."""
-        cache_key = f"environment_config_{self._environment}"
-        
-        if cache_key not in self._cache:
-            try:
-                config = self._rest_get("bot_config_environmentconfig", {"environment": self._environment, "is_active": "true"})
-                self._cache[cache_key] = {
-                    'session_name_pattern': config['session_name_pattern'],
-                    'log_level': config['log_level'],
-                    'log_format': config['log_format']
-                }
-            except Exception as e:
-                raise ConfigurationError(f"Environment configuration for '{self._environment}' not found in database: {e}")
-        
-        return self._cache[cache_key]
-    
-    def clear_cache(self):
-        """Clear the configuration cache."""
-        self._cache.clear()
+        obj = m.EnvironmentConfig.objects.filter(environment=self._env).first()
+        if not obj:
+            raise ConfigurationError(f"Environment config for '{self._env}' not found")
+        return {
+            'environment': obj.environment,
+            'session_name_pattern': obj.session_name_pattern,
+            'log_level': obj.log_level,
+            'log_format': obj.log_format,
+        }
+
+    def get_message_template(self, name: str) -> str:
+        try:
+            obj = m.MessageTemplate.objects.get(name=name)
+            return obj.template
+        except m.MessageTemplate.DoesNotExist:
+            raise ConfigurationError(f"Message template '{name}' not found")
 
 
-# Global singleton instance
-_config_loader = None
+# -------------------------------------------------------------------------
+# Global singleton (kept for convenience but easy to drop if undesired)
+# -------------------------------------------------------------------------
+_config_loader: Optional[ConfigLoader] = None
 
 def get_config_loader() -> ConfigLoader:
-    """Get the global config loader instance."""
     global _config_loader
     if _config_loader is None:
         _config_loader = ConfigLoader()
-    return _config_loader 
+    return _config_loader

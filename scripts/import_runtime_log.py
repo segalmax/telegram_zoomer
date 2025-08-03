@@ -13,7 +13,18 @@ Prerequisites:
 
 The script is idempotent – if the session/messages were already
 imported it exits silently.
+
+Production Safety: Only runs in development environments.
 """
+
+import sys
+import os
+
+# Add project root to path and check production safety
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from app.environment import assert_not_production
+assert_not_production()
+
 from __future__ import annotations
 
 import datetime as _dt

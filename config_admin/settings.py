@@ -80,30 +80,25 @@ WSGI_APPLICATION = 'config_admin.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/4.2/ref/settings/#databases
 
-# Supabase PostgreSQL - fail immediately if not configured properly
-SUPABASE_URL = os.getenv('SUPABASE_URL')
-SUPABASE_KEY = os.getenv('SUPABASE_KEY')
-SUPABASE_DB_PASSWORD = os.getenv('SUPABASE_DB_PASSWORD')
+# Database configuration - single source of truth
+import sys
+sys.path.insert(0, os.path.join(BASE_DIR, 'app'))
 
-assert SUPABASE_URL, "SUPABASE_URL environment variable is required"
-assert SUPABASE_KEY, "SUPABASE_KEY environment variable is required"
-assert SUPABASE_DB_PASSWORD, "SUPABASE_DB_PASSWORD environment variable is required"
-
-import urllib.parse
-parsed = urllib.parse.urlparse(SUPABASE_URL)
-project_id = parsed.hostname.split('.')[0]
+from database_config import get_database_config
+config = get_database_config()
+print(f"Django using: {config['description']}")
 
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'postgres',
-        'USER': 'postgres',
-        'PASSWORD': SUPABASE_DB_PASSWORD,
-        'HOST': f'db.{project_id}.supabase.co',
-        'PORT': '5432',
+        'NAME': config['database'],
+        'USER': config['user'],
+        'PASSWORD': config['password'],
+        'HOST': config['host'],
+        'PORT': config['port'],
         'OPTIONS': {
-            'sslmode': 'require',
-        },
+            'sslmode': 'require' if config['env'] == 'prod' else None,
+        } if config['env'] == 'prod' else {},
     }
 }
 

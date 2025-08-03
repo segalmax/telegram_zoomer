@@ -9,6 +9,10 @@ import os
 # Add project root directory to path so we can import the app package
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
+# Production safety check - MUST be early
+from app.environment import assert_not_production
+assert_not_production()
+
 from app.article_extractor import extract_article, extract_article_with_metadata
 
 def test_article_extraction():

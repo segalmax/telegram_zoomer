@@ -38,20 +38,28 @@ echo "🔗 Linking CLI to prod project ($SUPABASE_PROJECT_REF) …"
 # ignore errors if already linked
 npx supabase link --project-ref "$SUPABASE_PROJECT_REF" 2>/dev/null || true
 
-TMP_DUMP=tmp_prod_dump.sql
+TMP_DUMP=$(mktemp -t prod_dump_XXXX.sql)
 
-echo "📥 Dumping prod schema + data …"
-npx supabase db dump --schema public -f "$TMP_DUMP" >/dev/null
+echo "📥 Dumping prod schema + data (public schema only) …"
+PGPASSWORD="$SUPABASE_DB_PASSWORD" pg_dump \
+  --no-owner --no-acl \
+  --schema=public \
+  --encoding=UTF8 \
+  --dbname="$PROD_CONN" \
+  > "$TMP_DUMP"
 
 echo "🗑️  Resetting local database …"
 docker exec "$LOCAL_DB_CONTAINER" psql -U postgres -d postgres -c "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;" >/dev/null
 
-# Ensure vector extension exists before restoring tables that depend on it
 echo "🔧 Enabling vector extension …"
 docker exec "$LOCAL_DB_CONTAINER" psql -U postgres -d postgres -c "CREATE EXTENSION IF NOT EXISTS vector;" >/dev/null
 
 echo "📦 Restoring into local …"
-docker exec -i "$LOCAL_DB_CONTAINER" psql -U postgres -d postgres < "$TMP_DUMP" >/dev/null
+# Filter out CREATE SCHEMA public; line to avoid conflict
+grep -v "^CREATE SCHEMA public;$" "$TMP_DUMP" | docker exec -i "$LOCAL_DB_CONTAINER" psql -U postgres -d postgres -q >/dev/null 2>&1
+
+echo "🔒 Setting up permissions for service_role …"
+docker exec "$LOCAL_DB_CONTAINER" psql -U postgres -d postgres -c "GRANT ALL ON SCHEMA public TO service_role; GRANT ALL ON ALL TABLES IN SCHEMA public TO service_role; GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO service_role;" >/dev/null
 
 rm "$TMP_DUMP"
 

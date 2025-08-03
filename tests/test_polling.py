@@ -13,6 +13,11 @@ Usage:
 
 import os
 import sys
+
+# Production safety check - MUST be early
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from app.environment import assert_not_production
+assert_not_production()
 import asyncio
 import logging
 import time

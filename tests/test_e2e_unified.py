@@ -17,6 +17,11 @@ Usage (pytest):
 import os
 import sys
 import uuid
+
+# Production safety check - MUST be first
+from app.environment import assert_not_production
+assert_not_production()
+
 # Load environment variables FIRST before any imports that need them
 from pathlib import Path
 from dotenv import load_dotenv
