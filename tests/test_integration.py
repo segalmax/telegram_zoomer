@@ -25,7 +25,7 @@ from app.autogen_translation import get_anthropic_client
 # Add project root directory to path so we can import the app package
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from app.article_extractor import extract_article
+from app.article_extractor import aextract_article
 from app.autogen_translation import translate_and_link
 
 import pytest
@@ -38,7 +38,7 @@ async def test_article_extraction_integration():
     test_url = "https://www.ynet.co.il/digital/technews/article/sjbqaynwyl"
     
     print("=== Testing Article Extraction ===")
-    article_text = extract_article(test_url)
+    article_text = await aextract_article(test_url)
     print(f"Extracted article length: {len(article_text)} characters")
     print(f"Article preview: {article_text[:200]}...")
     

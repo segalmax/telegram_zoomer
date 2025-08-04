@@ -2,13 +2,13 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Run All E2E Tests (with logs)",
+            "name": "Run All Tests (with logs)",
             "type": "python",
             "request": "launch",
             "module": "pytest",
             "python": "${workspaceFolder}/.venv/bin/python",
             "args": [
-                "tests/test_e2e_unified.py",
+                "tests/",
                 "-s",
                 "--log-cli-level=DEBUG",
                 "--log-cli-format=%(name)s - %(levelname)s - %(message)s",

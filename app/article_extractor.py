@@ -50,6 +50,47 @@ def extract_article(url: str) -> str:
         article.download()
         article.parse()
         
+        # Extract text
+        article_text = article.text
+        
+        if not article_text or not article_text.strip():
+            logger.warning(f"No text content extracted from {url}")
+            return ""
+        
+        logger.info(f"Successfully extracted {len(article_text)} characters from {url}")
+        return article_text.strip()
+        
+    except Exception as e:
+        logger.warning(f"Failed to extract article from {url}: {e}")
+        return ""
+
+
+async def aextract_article(url: str) -> str:
+    """
+    Async version of extract_article for use in async contexts.
+    
+    Args:
+        url: The URL to extract article content from
+        
+    Returns:
+        str: The extracted article text, or empty string if extraction fails
+    """
+    if not url or not url.strip():
+        logger.warning("Empty URL provided to aextract_article")
+        return ""
+    
+    try:
+        # Get article extraction configuration from database using domain
+        domain = _extract_domain(url)
+        extraction_config = await config.aget_article_extraction_config(domain)
+            
+        # Create and configure article
+        article = Article(url, language=extraction_config['language_code'])
+        
+        # Download and parse
+        article.download()
+        article.parse()
+        
         # Validate extraction
         if not article.text or len(article.text.strip()) < extraction_config['min_article_length']:
             logger.warning(f"Article text too short or empty for URL: {url}")

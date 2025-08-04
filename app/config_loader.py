@@ -82,6 +82,9 @@ class ConfigLoader:
     
     async def aget_setting(self, key: str) -> Any:
         return await sync_to_async(self.get_setting)(key)
+    
+    async def aget_article_extraction_config(self, domain: str) -> Dict[str, Any]:
+        return await sync_to_async(self.get_article_extraction_config)(domain)
 
     def get_processing_limits(self) -> Dict[str, Any]:
         obj = m.ProcessingLimits.objects.filter(environment=self._env).first()

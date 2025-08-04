@@ -22,24 +22,30 @@ def get_anthropic_client(api_key: str):  # noqa: D401
     """Legacy helper retained for bot import compatibility."""
     return anthropic.Anthropic(api_key=api_key)
 
-def _memory_block(memories: List[Dict[str, Any]], k: int | None = None) -> str:
+async def _amemory_block(memories: List[Dict[str, Any]], k: int | None = None) -> str:
     """Return full source articles for contextual linking decisions."""
     config = get_config_loader()
     if k is None:
-        k = int(config.get_setting('DEFAULT_RECALL_K'))
+        k = int(await config.aget_setting('DEFAULT_RECALL_K'))
     
     block: List[str] = []
     for i, m in enumerate(memories[:k], 1):
         # Include FULL source article for proper contextual analysis
         source_text = m.get('source_text', '').strip()
         translation_text = m.get('translation_text', '').strip()
-        url = m.get('message_url', '')
         
-        # Show full context: source + translation + URL
-        entry = f"{i}. ИСТОЧНИК: {source_text}\n   ПЕРЕВОД: {translation_text}\n   URL: {url}"
-        block.append(entry)
+        if source_text and translation_text:
+            block.append(f"[{i}] Original: {source_text}")
+            block.append(f"[{i}] Translation: {translation_text}")
+            block.append("")  # Empty line for readability
     
-    return "\n\n".join(block)
+    return "\n".join(block) if block else "Нет предыдущих постов."
+
+
+def _memory_block(memories: List[Dict[str, Any]], k: int | None = None) -> str:
+    """Sync wrapper for _amemory_block - avoid duplication."""
+    import asyncio
+    return asyncio.run(_amemory_block(memories, k))
 
 # ---------------------------------------------------------------------------
 # AutoGen Translation System
@@ -89,7 +95,7 @@ class AutoGenTranslationSystem:
     async def run(self, enriched_input: str, memories: List[Dict[str, Any]], flow_collector=None) -> Tuple[str, str]:
         """Return (final_translation, conversation_log)."""
         # Build translator system message with memory context
-        memories_formatted = _memory_block(memories) if memories else "Нет предыдущих постов."
+        memories_formatted = await _amemory_block(memories) if memories else "Нет предыдущих постов."
         # Shared Lurkmore guidelines – prepend to each agent's system prompt (library lacks group-level support)
         shared_guidelines = await self.config.aget_prompt('lurkmore_complete_original_prompt')
 
