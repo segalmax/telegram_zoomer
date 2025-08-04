@@ -14,6 +14,8 @@ import django
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config_admin.settings")
 django.setup()
 
+from django.db import transaction
+from asgiref.sync import sync_to_async
 from bot_config import models as m
 
 
@@ -70,6 +72,13 @@ class ConfigLoader:
             'created_at': obj.created_at.isoformat(),
             'updated_at': obj.updated_at.isoformat(),
         }
+
+    # Async versions for use in async contexts (like Telegram bot)
+    async def aget_ai_model_config(self) -> Dict[str, Any]:
+        return await sync_to_async(self.get_ai_model_config)()
+    
+    async def aget_prompt(self, name: str) -> str:
+        return await sync_to_async(self.get_prompt)(name)
 
     def get_processing_limits(self) -> Dict[str, Any]:
         obj = m.ProcessingLimits.objects.filter(environment=self._env).first()

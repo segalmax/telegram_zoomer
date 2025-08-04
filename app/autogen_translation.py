@@ -50,7 +50,11 @@ class AutoGenTranslationSystem:
 
     def __init__(self) -> None:
         self.config = get_config_loader()
-        self.ai_config = self.config.get_ai_model_config()
+        # Note: ai_config will be loaded async in ainit()
+    
+    async def ainit(self) -> None:
+        """Async initialization for loading config from Django ORM."""
+        self.ai_config = await self.config.aget_ai_model_config()
 
         # Check for temporary environment variable overrides (for Streamlit Studio mode)
         if os.getenv('TEMP_ANTHROPIC_MODEL_ID'):
@@ -75,8 +79,8 @@ class AutoGenTranslationSystem:
             raise ValueError(f"Model {model_id} not supported")
 
         # Prompts stored in DB (with potential overrides for Streamlit Studio mode)
-        self.base_translator_prompt = os.getenv('TEMP_TRANSLATOR_PROMPT') or self.config.get_prompt('autogen_translator')
-        self.base_editor_prompt = os.getenv('TEMP_EDITOR_PROMPT') or self.config.get_prompt('autogen_editor')
+        self.base_translator_prompt = os.getenv('TEMP_TRANSLATOR_PROMPT') or await self.config.aget_prompt('autogen_translator')
+        self.base_editor_prompt = os.getenv('TEMP_EDITOR_PROMPT') or await self.config.aget_prompt('autogen_editor')
 
         # Conversation settings
         self.max_cycles = 2  # hard cap – user + 2 rounds → 5 messages total
@@ -200,6 +204,7 @@ class AutoGenTranslationSystem:
 async def translate_and_link(enriched_input: str, memories: List[Dict[str, Any]], flow_collector=None):
     """Async wrapper -> returns translation, conversation_log."""
     system = AutoGenTranslationSystem()
+    await system.ainit()  # Load config asynchronously
     final_translation_text, conversation_log = await system.run(enriched_input, memories, flow_collector)
 
     # Note: Memory storage is handled by the main bot flow in save_translation_to_memory()
