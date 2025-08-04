@@ -79,6 +79,9 @@ class ConfigLoader:
     
     async def aget_prompt(self, name: str) -> str:
         return await sync_to_async(self.get_prompt)(name)
+    
+    async def aget_setting(self, key: str) -> Any:
+        return await sync_to_async(self.get_setting)(key)
 
     def get_processing_limits(self) -> Dict[str, Any]:
         obj = m.ProcessingLimits.objects.filter(environment=self._env).first()

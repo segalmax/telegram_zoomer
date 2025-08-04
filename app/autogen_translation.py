@@ -91,7 +91,7 @@ class AutoGenTranslationSystem:
         # Build translator system message with memory context
         memories_formatted = _memory_block(memories) if memories else "Нет предыдущих постов."
         # Shared Lurkmore guidelines – prepend to each agent's system prompt (library lacks group-level support)
-        shared_guidelines = self.config.get_prompt('lurkmore_complete_original_prompt')
+        shared_guidelines = await self.config.aget_prompt('lurkmore_complete_original_prompt')
 
         translator_prompt = f"{shared_guidelines}\n\n{self.base_translator_prompt}"
         if '{memory_list' in translator_prompt:

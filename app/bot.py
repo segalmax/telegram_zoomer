@@ -573,8 +573,8 @@ async def main():
         if TEST_MODE and os.getenv("TEST_RUN_MESSAGE_PREFIX"):
             try:
                 # Get test mode limits from database
-                test_batch_limit = int(config.get_setting('TEST_MODE_BATCH_LIMIT'))
-                test_timeout = int(config.get_setting('TEST_MODE_TIMEOUT'))
+                test_batch_limit = int(await config.aget_setting('TEST_MODE_BATCH_LIMIT'))
+                test_timeout = int(await config.aget_setting('TEST_MODE_TIMEOUT'))
                 await process_recent_posts(client, limit=test_batch_limit, timeout=test_timeout)
             except Exception as e:
                 logger.warning(f"TEST_MODE pre-processing recent posts failed: {e}")
