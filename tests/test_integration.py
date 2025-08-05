@@ -110,7 +110,7 @@ async def test_article_extraction_integration():
         # CRITICAL TEST: Check for semantic links to previous messages
         import re
         links = re.findall(r'\[([^\]]+)\]\((https://t\.me/[^\)]+)\)', translated)
-        assert len(links) >= 2, f"Expected at least 2 semantic links to previous messages, found {len(links)}: {links}"
+        assert len(links) >= 2, f"Expected at least 2 embedded links to previous messages, found {len(links)}: {links}"
         
         print(f"✅ Found {len(links)} semantic links: {links}")
         print("\n✅ Integration with semantic linking test successful!")

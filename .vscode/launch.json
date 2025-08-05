@@ -72,6 +72,21 @@
                 "PYTHONPATH": "${workspaceFolder}",
                 "SUPABASE_ENV": "prod"
             }
+        },
+        {
+            "name": "Bot TEST Mode",
+            "type": "python",
+            "request": "launch",
+            "module": "app.bot",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}",
+                "SUPABASE_ENV": "local",
+                "TEST_MODE": "true",
+                "TEST_SRC_CHANNEL": "@nyttest",
+                "TEST_DST_CHANNEL": "@nytzoomerutest"
+            }
         }
     ]
 } 

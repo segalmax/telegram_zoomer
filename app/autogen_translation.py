@@ -42,11 +42,6 @@ async def _amemory_block(memories: List[Dict[str, Any]], k: int | None = None) -
     return "\n".join(block) if block else "Нет предыдущих постов."
 
 
-def _memory_block(memories: List[Dict[str, Any]], k: int | None = None) -> str:
-    """Sync wrapper for _amemory_block - avoid duplication."""
-    import asyncio
-    return asyncio.run(_amemory_block(memories, k))
-
 # ---------------------------------------------------------------------------
 # AutoGen Translation System
 # ---------------------------------------------------------------------------
