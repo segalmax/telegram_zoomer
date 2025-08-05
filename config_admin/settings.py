@@ -84,23 +84,32 @@ WSGI_APPLICATION = 'config_admin.wsgi.application'
 import sys
 sys.path.insert(0, os.path.join(BASE_DIR, 'app'))
 
-from database_config import get_database_config
-config = get_database_config()
-print(f"Django using: {config['description']}")
-
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': config['database'],
-        'USER': config['user'],
-        'PASSWORD': config['password'],
-        'HOST': config['host'],
-        'PORT': config['port'],
-        'OPTIONS': {
-            'sslmode': 'require' if config['env'] == 'prod' else None,
-        } if config['env'] == 'prod' else {},
+# Check for DATABASE_URL first (Heroku standard)
+DATABASE_URL = os.getenv('DATABASE_URL')
+if DATABASE_URL:
+    import dj_database_url
+    DATABASES = {
+        'default': dj_database_url.config(default=DATABASE_URL)
     }
-}
+    print("Django using: 🚀 Heroku DATABASE_URL")
+else:
+    from database_config import get_database_config
+    config = get_database_config()
+    print(f"Django using: {config['description']}")
+    
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': config['database'],
+            'USER': config['user'],
+            'PASSWORD': config['password'],
+            'HOST': config['host'],
+            'PORT': config['port'],
+            'OPTIONS': {
+                'sslmode': 'require' if config['env'] == 'prod' else None,
+            } if config['env'] == 'prod' else {},
+        }
+    }
 
 
 # Password validation
