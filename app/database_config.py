@@ -39,32 +39,43 @@ def get_database_config() -> Dict[str, Any]:
         supabase_url = os.getenv("SUPABASE_URL")
         supabase_key = os.getenv("SUPABASE_KEY")
         supabase_db_password = os.getenv("SUPABASE_DB_PASSWORD")
-        
+
         if not supabase_url or not supabase_key or not supabase_db_password:
             raise ValueError(
                 "Production Supabase requires: SUPABASE_URL, SUPABASE_KEY, SUPABASE_DB_PASSWORD"
             )
-        
+
         # Extract project ID from URL for database host
         import urllib.parse
         parsed = urllib.parse.urlparse(supabase_url)
         project_id = parsed.hostname.split('.')[0]
-        
+
+        # Prefer pooler host if provided (more reliable from some platforms and reduces connection churn)
+        pooler_host = os.getenv("SUPABASE_DB_HOST")
+        if pooler_host:
+            db_host = pooler_host
+            db_port = os.getenv("SUPABASE_DB_PORT", "6543")
+            description = "☁️ Production Supabase (pooler)"
+        else:
+            db_host = f"db.{project_id}.supabase.co"
+            db_port = "5432"
+            description = "☁️ Production Supabase"
+
         return {
             # Django connection details
-            "host": f"db.{project_id}.supabase.co",
-            "port": "5432",
+            "host": db_host,
+            "port": db_port,
             "user": "postgres",
             "password": supabase_db_password,
             "database": "postgres",
-            
+
             # REST API details
             "url": supabase_url,
             "api_key": supabase_key,
-            
+
             # Environment indicator
             "env": "prod",
-            "description": "☁️ Production Supabase"
+            "description": description
         }
 
 
