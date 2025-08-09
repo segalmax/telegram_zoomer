@@ -97,6 +97,13 @@ else:
     config = get_database_config()
     print(f"Django using: {config['description']}")
     
+    extra_options = {}
+    if config['env'] == 'prod':
+        extra_options['sslmode'] = 'require'
+        # Pass Supabase pooler routing option if present
+        if 'psycopg2_options' in config and config['psycopg2_options']:
+            extra_options['options'] = config['psycopg2_options']
+
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.postgresql',
@@ -105,9 +112,7 @@ else:
             'PASSWORD': config['password'],
             'HOST': config['host'],
             'PORT': config['port'],
-            'OPTIONS': {
-                'sslmode': 'require' if config['env'] == 'prod' else None,
-            } if config['env'] == 'prod' else {},
+            'OPTIONS': extra_options,
         }
     }
 

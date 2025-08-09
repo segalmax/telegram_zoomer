@@ -45,7 +45,7 @@ def get_database_config() -> Dict[str, Any]:
                 "Production Supabase requires: SUPABASE_URL, SUPABASE_KEY, SUPABASE_DB_PASSWORD"
             )
 
-        # Extract project ID from URL for database host
+        # Extract project ID from URL for database host and pooler routing
         import urllib.parse
         parsed = urllib.parse.urlparse(supabase_url)
         project_id = parsed.hostname.split('.')[0]
@@ -68,6 +68,9 @@ def get_database_config() -> Dict[str, Any]:
             "user": "postgres",
             "password": supabase_db_password,
             "database": "postgres",
+            # Psycopg2 startup options (used by pooler to route to correct tenant)
+            # Only meaningful for pooler; safe to include regardless
+            "psycopg2_options": f"project={project_id}",
 
             # REST API details
             "url": supabase_url,
