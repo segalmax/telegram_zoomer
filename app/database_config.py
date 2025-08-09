@@ -68,9 +68,8 @@ def get_database_config() -> Dict[str, Any]:
             "user": "postgres",
             "password": supabase_db_password,
             "database": "postgres",
-            # Psycopg2 startup options (used by pooler to route to correct tenant)
-            # Only meaningful for pooler; safe to include regardless
-            "psycopg2_options": f"project={project_id}",
+            # Psycopg2 startup options (only when using pooler) – Supabase pooler expects "-c project=<ref>"
+            **({"psycopg2_options": f"-c project={project_id}"} if pooler_host else {}),
 
             # REST API details
             "url": supabase_url,
