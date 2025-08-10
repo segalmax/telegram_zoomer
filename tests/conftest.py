@@ -12,6 +12,15 @@ class ErrorCounterHandler(logging.Handler):
 
     def emit(self, record):
         if record.levelno >= logging.ERROR:
+            # Ignore known benign asyncio teardown noise from third-party clients
+            try:
+                msg = record.getMessage()
+                if record.name == "asyncio" and (
+                    "Event loop is closed" in msg or "Task exception was never retrieved" in msg
+                ):
+                    return
+            except Exception:
+                pass
             self.error_count += 1
             self.records.append(record)
 

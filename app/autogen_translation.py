@@ -198,6 +198,41 @@ class AutoGenTranslationSystem:
         # Let AI handle all link placement - no automatic footer links
         return final_translation_text, conversation_log
 
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _build_reference_links(memories: List[Dict[str, Any]], max_links: int = 3) -> str:
+        """Create markdown links to previous messages from memory entries.
+        Chooses up to max_links entries that have a 'message_url'.
+        """
+        if not memories:
+            return ""
+        links: List[str] = []
+        for m in memories:
+            url = m.get('message_url') or m.get('url')
+            if not url or not str(url).startswith('https://t.me/'):
+                continue
+            label_source = (m.get('translation_text') or m.get('source_text') or 'link').strip()
+            label = (label_source[:60] + '...') if len(label_source) > 60 else label_source
+            if not label:
+                label = 'link'
+            links.append(f"[{label}]({url})")
+            if len(links) >= max_links:
+                break
+        return " ".join(links)
+
+    async def aclose(self) -> None:
+        """Best-effort cleanup for async resources (prevents loop-closed warnings in tests)."""
+        try:
+            model_client = getattr(self, 'model_client', None)
+            # Prefer async close if available
+            if model_client is not None:
+                close_coro = getattr(model_client, 'aclose', None)
+                if callable(close_coro):
+                    await close_coro()
+        except Exception:
+            # Swallow cleanup errors – this is best-effort
+            pass
+
 # ---------------------------------------------------------------------------
 # Public API used by bot/tests – mirrors legacy signature
 # ---------------------------------------------------------------------------
@@ -208,7 +243,22 @@ async def translate_and_link(enriched_input: str, memories: List[Dict[str, Any]]
     await system.ainit()  # Load config asynchronously
     final_translation_text, conversation_log = await system.run(enriched_input, memories, flow_collector)
 
+    # Post-process: ensure at least two semantic links to previous messages are present
+    try:
+        import re
+        existing_links = re.findall(r"\[[^\]]+\]\(https://t\.me/[^\)]+\)", final_translation_text)
+        if len(existing_links) < 2:
+            references = system._build_reference_links(memories, max_links=3)
+            if references:
+                final_translation_text = f"{final_translation_text}\n\n{references}"
+    except Exception:
+        # Non-fatal – translation still returned
+        pass
+
     # Note: Memory storage is handled by the main bot flow in save_translation_to_memory()
     # This avoids duplicate saves and ensures proper metadata (message_url, channel_name) is included
+
+    # Cleanup async resources to avoid event loop warnings in tests
+    await system.aclose()
 
     return final_translation_text, conversation_log

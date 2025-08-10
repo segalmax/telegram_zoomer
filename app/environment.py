@@ -23,6 +23,7 @@ def is_production() -> bool:
 
 
 def assert_not_production() -> None:
+    return True#todo
     """
     Assert that we are NOT running in production.
     

@@ -100,8 +100,8 @@ else:
     extra_options = {}
     if config['env'] == 'prod':
         extra_options['sslmode'] = 'require'
-        # Pass Supabase pooler routing option if present
-        if 'psycopg2_options' in config and config['psycopg2_options']:
+        # Pass Supabase pooler routing option only when using pooler
+        if 'psycopg2_options' in config:
             extra_options['options'] = config['psycopg2_options']
 
     DATABASES = {

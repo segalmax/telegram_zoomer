@@ -194,6 +194,24 @@ logging.basicConfig(
 )
 logger = logging.getLogger('app.bot')
 
+# Decode escaped unicode sequences in noisy third-party JSON logs so output shows real text
+class _UnicodeUnescapeFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            msg = record.getMessage()
+            if "\\u" in msg:
+                # Decode \uXXXX and other escape sequences into real characters/newlines
+                decoded = bytes(msg, 'utf-8').decode('unicode_escape')
+                record.msg = decoded
+                record.args = ()
+        except Exception:
+            pass
+        return True
+
+# Apply only to verbose autogen loggers
+for noisy in ('autogen_core.events', 'autogen_core'):
+    logging.getLogger(noisy).addFilter(_UnicodeUnescapeFilter())
+
 # Check for TEST_SRC_CHANNEL and TEST_DST_CHANNEL environment variables
 # This helps us switch to test mode when running tests
 TEST_MODE = False
@@ -259,18 +277,19 @@ def query_translation_memory(source_message_text, message_id, flow_collector):
     try:
         logger.info(f"🧠 Querying translation memory for message {message_id} (k=10)")
         logger.debug(f"🔍 Query text preview: {source_message_text[:100]}...")
-        
-        memories = recall_tm(source_message_text, k=10, channel_name="nytzoomeru")
+
+        # Channel filtering removed: always query global TM
+        memories = recall_tm(source_message_text, k=10, channel_name=None)
         memory_query_time = time.time() - memory_start_time
-        
+
         if flow_collector:
             flow_collector.log_memory_query(source_message_text, memories, memory_query_time)
-        
+
         if memories:
             log_memory_analysis(memories, memory_query_time)
         else:
             logger.warning(f"❌ No memories found for message {message_id} in {memory_query_time:.3f}s")
-            
+
     except Exception as e:
         memory_query_time = time.time() - memory_start_time
         logger.error(f"💥 TM recall failed for message {message_id} after {memory_query_time:.3f}s: {e}", exc_info=True)

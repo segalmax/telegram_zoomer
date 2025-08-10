@@ -131,9 +131,7 @@ def recall(source_message_text: str, k: int = 10, channel_name: str | None = Non
         db_time = time.time() - db_start
         
         raw_results = res.data or []  # type: ignore
-        # Optional channel filter
-        if channel_name is not None:
-            raw_results = [r for r in raw_results if r.get("channel_name") == channel_name]
+        # Channel-based filtering intentionally disabled: always search globally
         logger.debug(f"🧠 DB query in {db_time:.3f}s, fetched {len(raw_results)} candidates for re-ranking")
         
         # ------------------------------------------------------------------
