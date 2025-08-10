@@ -73,9 +73,11 @@ def save_pair(  source_message_text: str,
     pair_id = pair_id or str(uuid.uuid4())
     logger.debug(f"💾 Starting save_pair: id={pair_id}, src_len={len(source_message_text)}, tgt_len={len(tgt)}, message_id={message_id}, url={message_url}")
     
-    # Generate embedding
+    # Generate embedding over full context: original + full translation
+    # This makes recalls consider the complete translated content, not just titles
     embed_start = time.time()
-    vec = _embed(source_message_text)
+    embedding_text = f"{source_message_text}\n\n{tgt}"
+    vec = _embed(embedding_text)
     embed_time = time.time() - embed_start
     logger.debug(f"🔢 Generated embedding in {embed_time:.3f}s: {len(vec)} dimensions")
     

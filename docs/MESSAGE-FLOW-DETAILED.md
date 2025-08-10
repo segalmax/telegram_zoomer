@@ -12,8 +12,8 @@ graph TD
     end
     
     subgraph "3️⃣ Memory System"
-        C1["🧠 recall_tm(source_message_text='netanyahu attacks iran...', k=10, channel_name='nytzoomeru')"]
-        C2["🔢 _embed(text='netanyahu attacks iran...')<br/>model: text-embedding-ada-002 → vec[1536 dimensions]"]
+        C1["🧠 recall_tm(source_message_text='netanyahu attacks iran...', k=10)\n(no channel filter – global)"]
+        C2["🔢 _embed(text='source + full translation')<br/>model: text-embedding-ada-002 → vec[1536 dimensions]"]
         C3["🗃️ _sb.rpc('match_article_chunks', query_embedding=vec, match_count=40)"]
         C4["📚 memory[]<br/>[{source_text, translation_text, similarity: 0.85, message_url}, ...]"]
     end
@@ -32,7 +32,7 @@ graph TD
         
         subgraph "6a Prompt Assembly"
             E2a["📝 Translator Prompt<br/>lurkmore_complete_original_prompt<br/>+ autogen_translator<br/>+ 🔎 Память: _memory_block(memories)"]
-            E2b["📝 Editor Prompt<br/>lurkmore_complete_original_prompt<br/>+ autogen_editor<br/>❌ NO memory context"]
+            E2b["📝 Editor Prompt<br/>lurkmore_complete_original_prompt<br/>+ autogen_editor<br/>🔎 Память: _memory_block(memories)"]
             E2c["🧠 _memory_block() Format<br/>1. ИСТОЧНИК: {source_text} ⚠️ ORIGINAL message only<br/>   ПЕРЕВОД: {translation_text} ✅ Full posted translation<br/>   URL: {message_url} 🔗 Destination channel URL"]
         end
         
@@ -60,7 +60,7 @@ graph TD
     subgraph "8️⃣ Delivery & Storage"
         G1["📢 client.send_message(dst_channel_to_use, final_post_content, parse_mode='md')"]
         G2["💾 save_pair(source_message_text, tgt=final_translation_text, pair_id, message_url)<br/>✅ Single save with proper metadata (message_url, channel_name)"]
-        G3["🔢 _embed(text=source_message_text) → embedding vector → Supabase 'article_chunks'"]
+        G3["🔢 _embed(text=source + full translation) → embedding vector → Supabase 'article_chunks'"]
     end
 
     %% Sequential flow

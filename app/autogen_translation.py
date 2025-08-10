@@ -111,7 +111,12 @@ class AutoGenTranslationSystem:
             model_client=self.model_client,
             system_message=translator_prompt,
         )
+        # Make the editor memory-aware as well for better critique
         editor_prompt = f"{shared_guidelines}\n\n{self.base_editor_prompt}"
+        if '{memory_list' in editor_prompt:
+            editor_prompt = editor_prompt.format(memory_list=memories_formatted)
+        else:
+            editor_prompt = f"{editor_prompt}\n\n🔎 Память:\n{memories_formatted}"
         editor = AssistantAgent(
             name="Editor",
             model_client=self.model_client,
