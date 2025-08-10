@@ -61,11 +61,14 @@ def get_database_config() -> Dict[str, Any]:
             db_port = "5432"
             description = "☁️ Production Supabase"
 
+        # Determine DB user (pooler requires username with project ref)
+        db_user = os.getenv("SUPABASE_DB_USER") or (f"postgres.{project_id}" if pooler_host else "postgres")
+
         return {
             # Django connection details
             "host": db_host,
             "port": db_port,
-            "user": "postgres",
+            "user": db_user,
             "password": supabase_db_password,
             "database": "postgres",
             # Psycopg2 startup options (only when using pooler) – Supabase pooler expects "-c project=<ref>"
