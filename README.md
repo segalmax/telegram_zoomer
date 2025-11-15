@@ -2,7 +2,7 @@
 
 > **Converts news posts into zoomer slang with AI-powered context linking**
 
-🎯 **Event-driven bot** with Claude Sonnet 4 translation + semantic memory system
+🎯 **Event-driven bot** with writer + editor AI agents workflow using Supabase pg vector db.
 
 ## 🚀 Quick Setup
 
