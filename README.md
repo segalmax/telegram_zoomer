@@ -1,6 +1,6 @@
 # Telegram News-to-Zoomer Bot
 
-> **Converts news posts into Russian zoomer slang with AI-powered context linking**
+> **Converts news posts into zoomer slang with AI-powered context linking**
 
 🎯 **Event-driven bot** with Claude Sonnet 4 translation + semantic memory system
 
