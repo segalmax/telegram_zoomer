@@ -50,7 +50,7 @@ python app/bot.py --process-recent 1          # Test with last post
 **→ [📚 Full Documentation Index](docs/INDEX.md)** ← Start here for learning
 
 ### Quick Navigation
-- **🏗️ Message Flow Overview** → [docs/MESSAGE-FLOW-DETAILED.md](MESSAGE-FLOW-DETAILED.md)
+- **🏗️ Message Flow Overview** → [docs/MESSAGE-FLOW-DETAILED.md](docs/MESSAGE-FLOW-DETAILED.md)
 
 ## 🎯 Essential Commands
 ```bash
