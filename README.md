@@ -50,12 +50,7 @@ python app/bot.py --process-recent 1          # Test with last post
 **→ [📚 Full Documentation Index](docs/INDEX.md)** ← Start here for learning
 
 ### Quick Navigation
-- **🏗️ System Overview** → [docs/SYSTEM-DESIGN.md](docs/SYSTEM-DESIGN.md)
-- **🧠 AI Translation** → [docs/AI-TRANSLATION.md](docs/AI-TRANSLATION.md) 
-- **📡 Telegram Integration** → [docs/TELEGRAM-LAYER.md](docs/TELEGRAM-LAYER.md)
-- **💾 Database Design** → [docs/DATA-ARCHITECTURE.md](docs/DATA-ARCHITECTURE.md)
-- **🧪 Testing** → [docs/TESTING-STRATEGY.md](docs/TESTING-STRATEGY.md)
-- **🚀 Deployment** → [docs/DEPLOYMENT-ARCHITECTURE.md](docs/DEPLOYMENT-ARCHITECTURE.md)
+- **🏗️ Message Flow Overview** → [docs/MESSAGE-FLOW-DETAILED.md](MESSAGE-FLOW-DETAILED.md)
 
 ## 🎯 Essential Commands
 ```bash
